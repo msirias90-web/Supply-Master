@@ -485,7 +485,8 @@ const CSS = `
 .rec .tk-cat{font-size:11.5px;color:var(--soft);}
 .rec .tk-img{height:124px;background:var(--fondo);border-bottom:1px solid var(--linea);display:grid;place-items:center;overflow:hidden;}
 .rec .tk-img svg{width:100%;height:100%;display:block;}
-.rec .tk-img img{width:100%;height:100%;object-fit:cover;display:block;}
+/* contain y no cover: la foto del premio se ve entera, sin recortar. */
+.rec .tk-img img{width:100%;height:100%;object-fit:contain;display:block;}
 .rec .tk-texto{padding:14px 14px 12px;flex:1;}
 .rec .tk h3{font-size:16.5px;margin-bottom:5px;}
 .rec .tk p{margin:0;font-size:13.5px;color:var(--soft);}
@@ -549,15 +550,20 @@ const CSS = `
 .rec .vacio b{display:block;font-size:17px;font-weight:700;color:var(--ink);margin-bottom:6px;}
 .rec .aviso{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--verde);color:#EDE7DA;padding:11px 20px;border-radius:3px;font-size:14px;font-weight:500;z-index:90;box-shadow:0 6px 20px rgba(6,48,43,.28);}
 .rec .mini{width:52px;height:38px;background:var(--fondo);border:1px solid var(--linea);border-radius:2px;overflow:hidden;flex:none;}
-.rec .mini svg,.rec .mini img{width:100%;height:100%;object-fit:cover;display:block;}
+.rec .mini svg,.rec .mini img{width:100%;height:100%;object-fit:contain;display:block;}
 .rec .iconos{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;}
 .rec .iconos button{border:1px solid var(--linea-2);background:var(--fondo);border-radius:2px;padding:0;overflow:hidden;display:block;}
 .rec .iconos button svg{width:100%;height:54px;display:block;}
 .rec .iconos button small{display:block;font-size:10.5px;font-weight:500;padding:4px 3px;background:var(--panel);border-top:1px solid var(--linea);line-height:1.2;color:var(--soft);}
 .rec .iconos button[aria-pressed="true"]{border-color:var(--oro);box-shadow:inset 0 0 0 1px var(--oro);}
 .rec .iconos button[aria-pressed="true"] small{color:var(--ink);font-weight:600;}
+.rec .foto-canje{background:var(--fondo);border:1px solid var(--linea);border-radius:3px;
+  height:260px;display:grid;place-items:center;overflow:hidden;}
+.rec .foto-canje img,.rec .foto-canje svg{max-width:100%;max-height:100%;width:auto;height:auto;
+  object-fit:contain;display:block;}
+@media (max-width:620px){ .rec .foto-canje{height:200px;} }
 .rec .previa{width:168px;height:116px;background:var(--fondo);border:1px solid var(--linea-2);border-radius:2px;overflow:hidden;flex:none;}
-.rec .previa svg,.rec .previa img{width:100%;height:100%;object-fit:cover;display:block;}
+.rec .previa svg,.rec .previa img{width:100%;height:100%;object-fit:contain;display:block;}
 .rec .barras-cat{margin-bottom:13px;}
 .rec .barras-cat .fila{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:5px;}
 .rec .barras-cat .pista{height:9px;background:var(--fondo);border:1px solid var(--linea);border-radius:1px;overflow:hidden;}
@@ -572,6 +578,14 @@ const CSS = `
 .rec .nominado b{font-size:16px;}
 .rec .nominado .proy{font-size:13px;color:var(--verde);margin-top:2px;}
 .rec .nominado .mot{font-size:13.5px;color:var(--soft);margin-top:3px;}
+.rec .relato{margin-top:7px;display:grid;gap:5px;}
+.rec .relato .parte{display:grid;grid-template-columns:76px 1fr;gap:10px;align-items:baseline;}
+.rec .relato .rot-parte{font-size:11px;font-weight:700;color:var(--oro);letter-spacing:.04em;
+  text-transform:uppercase;}
+.rec .relato .txt-parte{font-size:13.5px;color:var(--soft);line-height:1.45;}
+.rec .relato.compacto .parte{grid-template-columns:1fr;gap:1px;}
+.rec .relato.compacto .txt-parte{color:#C8D0CD;}
+@media (max-width:620px){ .rec .relato .parte{grid-template-columns:1fr;gap:1px;} }
 .rec .nominado .quien-nom{font-size:12px;color:var(--soft);margin-top:6px;}
 .rec .nominado.sorteo{box-shadow:inset 4px 0 0 var(--oro-claro);transform:scale(1.015);}
 .rec .nominado.apagado{opacity:.38;}
@@ -1389,8 +1403,8 @@ function semilla() {
     asignado: true,
     asignadoFecha: d(30)
   };
-  const previas = [["Quality Hero", "u2", "a1", "Cero hallazgos en la auditoría de bodega.", true], ["Quality Hero", "u3", "u1", "Detectó la discrepancia de lote antes del despacho.", false], ["Innovation Hero", "u5", "u2", "Rediseñó el formato de conteo cíclico.", true], ["Innovation Hero", "u4", "a2", "Automatizó el reporte semanal de faltantes.", false], ["Operational Excellence Hero", "u1", "a1", "Reorganizó el flujo de recibo y bajó el tiempo de descarga.", true], ["MVP", "u6", "a2", "Cubrió dos rutas críticas durante la temporada alta.", true], ["MVP", "u1", "u2", "Sostuvo la operación durante la semana de inventario.", false]];
-  previas.forEach(([cat, persona, por, motivo, gano]) => {
+  const previas = [["Quality Hero", "u2", "a1", "Venía la auditoría anual de bodega y el año anterior hubo seis hallazgos.", "Revisó y ordenó la documentación de todo el almacén durante tres semanas.", "La auditoría cerró con cero hallazgos.", true], ["Quality Hero", "u3", "u1", "Un lote iba a salir con número de serie equivocado.", "Detuvo el despacho y cotejó el lote contra la orden original.", "Se evitó el reclamo y la devolución del cliente.", false], ["Innovation Hero", "u5", "u2", "El conteo cíclico se hacía en papel y tardaba dos días.", "Rediseñó el formato y lo pasó a una hoja compartida.", "El conteo ahora toma medio día y se ve en tiempo real.", true], ["Innovation Hero", "u4", "a2", "El reporte de faltantes se armaba a mano cada semana.", "Automatizó la extracción y el formato del reporte.", "De cuatro horas semanales a quince minutos.", false], ["Operational Excellence Hero", "u1", "a1", "La descarga de contenedores tardaba más de lo previsto y atrasaba al resto.", "Reorganizó el flujo de recibo y reasignó las posiciones del muelle.", "El tiempo de descarga bajó de 40 a 22 minutos por contenedor.", true], ["MVP", "u6", "a2", "Dos compañeros se incapacitaron en plena temporada alta.", "Cubrió las dos rutas críticas además de la suya, por tres semanas.", "No se atrasó ni un despacho en todo el periodo.", true], ["MVP", "u1", "u2", "La semana de inventario coincidió con el cierre de mes.", "Coordinó los turnos y sostuvo la operación sin parar la bodega.", "Se cerró el inventario a tiempo y sin diferencias.", false]];
+  previas.forEach(([cat, persona, por, contexto, accion, resultado, gano]) => {
     const nid = id();
     nominaciones.push({
       id: nid,
@@ -1399,7 +1413,10 @@ function semilla() {
       persona,
       por,
       proyecto: "",
-      motivo,
+      contexto,
+      accion,
+      resultado,
+      motivo: "",
       fecha: d(50),
       apoyos: []
     });
@@ -1442,9 +1459,9 @@ function semilla() {
     asignado: false,
     asignadoFecha: null
   };
-  const abiertas = [["Quality Hero", "u4", "a1", "Corrigió el etiquetado de producto en tránsito antes de que saliera."], ["Quality Hero", "u5", "u2", "Mantuvo la exactitud de inventario por encima del 99%."], ["Innovation Hero", "u2", "a2", "Propuso el tablero de seguimiento de órdenes abiertas."], ["Innovation Hero", "u6", "u1", "Automatizó la conciliación de guías de transporte."], ["Operational Excellence Hero", "u3", "a1", "Propuso el conteo cíclico que redujo los faltantes."], ["MVP", "u1", "a2", "Lideró la migración del sistema de bodega sin parar la operación."]];
+  const abiertas = [["Quality Hero", "u4", "a1", "Un pallet en tránsito llevaba etiquetas de otro destino.", "Lo detectó en la revisión de salida y lo reetiquetó antes de cargarlo.", "El envío llegó correcto y no hubo costo de reexpedición."], ["Quality Hero", "u5", "u2", "La exactitud de inventario venía cayendo desde el trimestre pasado.", "Implementó una revisión diaria de las posiciones de mayor rotación.", "La exactitud se mantuvo por encima del 99% los últimos tres meses."], ["Innovation Hero", "u2", "a2", "Nadie sabía cuántas órdenes quedaban abiertas sin consultar tres sistemas.", "Propuso y armó un tablero que junta las tres fuentes en una sola pantalla.", "El equipo revisa las órdenes abiertas en un minuto, no en media hora."], ["Innovation Hero", "u6", "u1", "La conciliación de guías de transporte se hacía una por una.", "Automatizó el cruce entre las guías del transportista y las nuestras.", "Se detectaron doce cobros duplicados que antes pasaban por alto."], ["Operational Excellence Hero", "u3", "a1", "Los faltantes aparecían hasta el inventario de fin de mes.", "Propuso un conteo cíclico semanal por familia de producto.", "Los faltantes se detectan a los días y bajaron a la mitad."], ["MVP", "u1", "a2", "Había que migrar el sistema de bodega sin detener los despachos.", "Lideró la migración trabajando en paralelo con el sistema viejo.", "Se migró completo sin un solo día de operación detenida."]];
   const ids = {};
-  abiertas.forEach(([cat, persona, por, motivo]) => {
+  abiertas.forEach(([cat, persona, por, contexto, accion, resultado]) => {
     const nid = id();
     ids[cat + persona] = nid;
     nominaciones.push({
@@ -1454,7 +1471,10 @@ function semilla() {
       persona,
       por,
       proyecto: "",
-      motivo,
+      contexto,
+      accion,
+      resultado,
+      motivo: "",
       fecha: d(8),
       apoyos: []
     });
@@ -1947,9 +1967,14 @@ function MiSaldo({
       className: "b oro",
       onClick: hacerCanje
     }, "Canjear ", miles(confirmar.costo), " puntos"))
-  }, /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "foto-canje"
+  }, /*#__PURE__*/React.createElement(Imagen, {
+    premio: confirmar,
+    imgs: imgs
+  })), /*#__PURE__*/React.createElement("p", {
     style: {
-      marginTop: 0
+      marginTop: 16
     }
   }, "Va a canjear ", /*#__PURE__*/React.createElement("b", null, confirmar.nombre), " por ", miles(confirmar.costo), " puntos. Le quedarían ", miles(saldo - confirmar.costo), "."), /*#__PURE__*/React.createElement("p", {
     style: {
@@ -2020,6 +2045,28 @@ const sinMovimiento = () => {
     return false;
   }
 };
+
+/** El relato de una nominación, en sus tres partes.
+    Las nominaciones viejas traían un solo texto: esas se muestran tal cual. */
+function Relato({
+  n,
+  compacto = false
+}) {
+  const partes = [["Contexto", n.contexto], ["Acción", n.accion], ["Resultado", n.resultado]].filter(([, t]) => t && t.trim());
+  if (!partes.length) return /*#__PURE__*/React.createElement("div", {
+    className: "mot"
+  }, n.motivo);
+  return /*#__PURE__*/React.createElement("div", {
+    className: compacto ? "relato compacto" : "relato"
+  }, partes.map(([rotulo, texto]) => /*#__PURE__*/React.createElement("div", {
+    key: rotulo,
+    className: "parte"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "rot-parte"
+  }, rotulo), /*#__PURE__*/React.createElement("span", {
+    className: "txt-parte"
+  }, texto))));
+}
 
 /* ---------------- sonido de la revelación ----------------
    El redoble y el platillo se sintetizan en el momento con la API de audio
@@ -2312,7 +2359,10 @@ function EscenaGanador({
     className: "motivo-gana"
   }, /*#__PURE__*/React.createElement("b", null, ganador.proyecto)), /*#__PURE__*/React.createElement("div", {
     className: "motivo-gana"
-  }, ganador.motivo), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Relato, {
+    n: ganador,
+    compacto: true
+  })), /*#__PURE__*/React.createElement("div", {
     className: "votos-gana"
   }, conteo[ganador.id] || 0, " de ", total, " ", total === 1 ? "voto" : "votos"), /*#__PURE__*/React.createElement("div", {
     className: "cerrar"
@@ -2385,17 +2435,18 @@ function CategoriaResultado({
       className: "corona"
     }, "★ Ganador"), n.proyecto && /*#__PURE__*/React.createElement("div", {
       className: "proy"
-    }, n.proyecto), /*#__PURE__*/React.createElement("div", {
-      className: "mot"
-    }, n.motivo), n.apoyos.map((a, k) => /*#__PURE__*/React.createElement("div", {
+    }, n.proyecto), /*#__PURE__*/React.createElement(Relato, {
+      n: n
+    }), n.apoyos.map((a, k) => /*#__PURE__*/React.createElement("div", {
       key: k,
-      className: "mot",
       style: {
         paddingLeft: 10,
         borderLeft: "2px solid var(--linea-2)",
-        marginTop: 5
+        marginTop: 8
       }
-    }, a.motivo)), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement(Relato, {
+      n: a
+    }))), /*#__PURE__*/React.createElement("div", {
       className: "quien-nom"
     }, "Nominado por ", nombreDe(n.por))), revelado && /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2498,7 +2549,9 @@ function Nominar({
   const [cat, setCat] = useState(CATEGORIAS[0]);
   const [persona, setPersona] = useState("");
   const [proyecto, setProyecto] = useState("");
-  const [motivo, setMotivo] = useState("");
+  const [contexto, setContexto] = useState("");
+  const [accion, setAccion] = useState("");
+  const [resultado, setResultado] = useState("");
   if (!ciclo) return /*#__PURE__*/React.createElement("div", {
     className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Nominar"), /*#__PURE__*/React.createElement("div", {
@@ -2516,24 +2569,32 @@ function Nominar({
   const yaEsta = pid => delCat.find(n => n.persona === pid);
   const enviar = () => {
     if (!persona) return avisar("Escoja a quién va a nominar");
-    if (!motivo.trim()) return avisar("Escriba por qué lo nomina");
+    if (!contexto.trim()) return avisar("Falta el contexto");
+    if (!accion.trim()) return avisar("Falta la acción");
+    if (!resultado.trim()) return avisar("Falta el resultado");
+    const relato = {
+      contexto: contexto.trim(),
+      accion: accion.trim(),
+      resultado: resultado.trim()
+    };
     const existente = yaEsta(persona);
     if (existente) {
-      apoyar(existente.id, motivo.trim());
+      apoyar(existente.id, relato);
       avisar("Ya estaba nominado: se agregó su respaldo");
     } else {
-      nominar({
+      nominar(_objectSpread({
         ciclo: ciclo.id,
         cat,
         persona,
-        proyecto: proyecto.trim(),
-        motivo: motivo.trim()
-      });
+        proyecto: proyecto.trim()
+      }, relato));
       avisar("Nominación registrada");
     }
     setPersona("");
     setProyecto("");
-    setMotivo("");
+    setContexto("");
+    setAccion("");
+    setResultado("");
   };
   const nombreDe = pid => {
     var _datos$personas$find;
@@ -2570,12 +2631,26 @@ function Nominar({
     onChange: e => setProyecto(e.target.value),
     placeholder: "Migración del sistema de bodega"
   })), /*#__PURE__*/React.createElement(Campo, {
-    label: "¿Por qué? Sea concreto"
+    label: "Contexto"
   }, /*#__PURE__*/React.createElement("textarea", {
-    rows: 3,
-    value: motivo,
-    onChange: e => setMotivo(e.target.value),
-    placeholder: "Detectó la discrepancia de lote antes del despacho y evitó el reclamo del cliente."
+    rows: 2,
+    value: contexto,
+    onChange: e => setContexto(e.target.value),
+    placeholder: "Qué estaba pasando. Ejemplo: un lote salía con el etiquetado equivocado y ya estaba en la rampa de carga."
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Acción"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    rows: 2,
+    value: accion,
+    onChange: e => setAccion(e.target.value),
+    placeholder: "Qué hizo esta persona. Ejemplo: detuvo el despacho, revisó el lote completo y corrigió las etiquetas."
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Resultado"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    rows: 2,
+    value: resultado,
+    onChange: e => setResultado(e.target.value),
+    placeholder: "En qué terminó. Ejemplo: el cliente recibió todo correcto y se evitó un reclamo."
   })), /*#__PURE__*/React.createElement("button", {
     className: "b oro",
     onClick: enviar
@@ -2585,7 +2660,7 @@ function Nominar({
       color: "var(--soft)",
       margin: "12px 0 0"
     }
-  }, "No puede nominarse a usted mismo. Si la persona ya está nominada en esa categoría, su texto se guarda como respaldo adicional.")), /*#__PURE__*/React.createElement("div", {
+  }, "Las tres partes son obligatorias: así el jurado sabe qué pasó, qué hizo la persona y en qué terminó. No puede nominarse a usted mismo. Si la persona ya está nominada en esa categoría, su texto se guarda como respaldo adicional.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Nominaciones de este mes"), /*#__PURE__*/React.createElement("p", {
     className: "pie"
@@ -2623,17 +2698,13 @@ function Nominar({
         color: "var(--verde)",
         marginTop: 2
       }
-    }, n.proyecto), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 13.5,
-        color: "var(--soft)",
-        marginTop: 2
-      }
-    }, n.motivo), /*#__PURE__*/React.createElement("div", {
+    }, n.proyecto), /*#__PURE__*/React.createElement(Relato, {
+      n: n
+    }), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: "var(--soft)",
-        marginTop: 5
+        marginTop: 7
       }
     }, "Nominado por ", nombreDe(n.por), n.apoyos.length > 0 && ` · ${n.apoyos.length} respaldo${n.apoyos.length === 1 ? "" : "s"}`))));
   })));
@@ -2737,22 +2808,18 @@ function Votar({
           color: "var(--verde)",
           marginTop: 2
         }
-      }, n.proyecto), /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 13.5,
-          color: "var(--soft)",
-          marginTop: 3
-        }
-      }, n.motivo), n.apoyos.map((a, i) => /*#__PURE__*/React.createElement("div", {
+      }, n.proyecto), /*#__PURE__*/React.createElement(Relato, {
+        n: n
+      }), n.apoyos.map((a, i) => /*#__PURE__*/React.createElement("div", {
         key: i,
         style: {
-          fontSize: 13,
-          color: "var(--soft)",
-          marginTop: 5,
+          marginTop: 8,
           paddingLeft: 10,
           borderLeft: "2px solid var(--linea-2)"
         }
-      }, a.motivo)), /*#__PURE__*/React.createElement("div", {
+      }, /*#__PURE__*/React.createElement(Relato, {
+        n: a
+      }))), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: "var(--soft)",
@@ -4080,7 +4147,11 @@ function Programa() {
       }, c)),
       nominaciones: (lista(d.nominaciones) || []).map(n => _objectSpread({
         apoyos: [],
-        proyecto: ""
+        proyecto: "",
+        motivo: "",
+        contexto: "",
+        accion: "",
+        resultado: ""
       }, n)),
       votos: lista(d.votos) || [],
       movimientos: lista(d.movimientos) || [],
@@ -4181,7 +4252,9 @@ function Programa() {
     cat,
     persona,
     proyecto,
-    motivo
+    contexto,
+    accion,
+    resultado
   }) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
     nominaciones: [...d.nominaciones, {
       id: id(),
@@ -4190,18 +4263,22 @@ function Programa() {
       persona,
       por: yo.id,
       proyecto: proyecto || "",
-      motivo,
+      contexto,
+      accion,
+      resultado,
+      motivo: "",
       fecha: new Date().toISOString(),
       apoyos: []
     }]
   }));
-  const apoyar = (nominacionId, motivo) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
+  const apoyar = (nominacionId, relato) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
     nominaciones: d.nominaciones.map(n => n.id === nominacionId ? _objectSpread(_objectSpread({}, n), {}, {
-      apoyos: [...n.apoyos, {
-        por: yo.id,
-        motivo,
+      apoyos: [...n.apoyos, _objectSpread(_objectSpread({
+        por: yo.id
+      }, relato), {}, {
+        motivo: "",
         fecha: new Date().toISOString()
-      }]
+      })]
     }) : n)
   }));
 
