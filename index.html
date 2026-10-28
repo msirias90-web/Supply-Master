@@ -586,6 +586,21 @@ const CSS = `
 .rec .relato.compacto .parte{grid-template-columns:1fr;gap:1px;}
 .rec .relato.compacto .txt-parte{color:#C8D0CD;}
 @media (max-width:620px){ .rec .relato .parte{grid-template-columns:1fr;gap:1px;} }
+
+/* Tabla de contraseñas: en el teléfono se esconde la columna "Hoy entra con" y ese dato
+   pasa debajo del nombre, para que el botón Cambiar quepa sin tener que deslizar. */
+.rec .angosto{display:none;}
+@media (max-width:620px){
+  .rec .ancho{display:none;}
+  .rec .angosto{display:block;}
+  .rec .clave-nueva{width:88px!important;min-width:0!important;padding:8px 7px!important;}
+  .rec .tabla-claves{width:100%;table-layout:fixed;}
+  .rec .tabla-claves td,.rec .tabla-claves th{padding-left:7px;padding-right:7px;
+    overflow-wrap:anywhere;vertical-align:middle;}
+  .rec .tabla-claves .acciones{white-space:nowrap!important;width:114px;}
+  .rec .tabla-claves .col-clave{width:102px;}
+  .rec .tabla-claves .acciones .b{display:block;width:100%;margin:0 0 5px;padding-left:4px;padding-right:4px;}
+}
 .rec .nominado .quien-nom{font-size:12px;color:var(--soft);margin-top:6px;}
 .rec .nominado.sorteo{box-shadow:inset 4px 0 0 var(--oro-claro);transform:scale(1.015);}
 .rec .nominado.apagado{opacity:.38;}
@@ -1139,103 +1154,43 @@ const PUNTOS = {
   ganador: 40
 };
 const EXTRA_GANADOR = PUNTOS.ganador - PUNTOS.nominado;
-const PERSONAS = [{
-  id: "a1",
-  usuario: "MSirias",
-  nombre: "M. Sirias",
+
+/* El usuario es la primera letra del nombre más el apellido. Todos pueden nominar;
+   el jurado se marca en Ajustes y aquí vienen tres marcados para empezar. */
+const col = (id, usuario, nombre, depto, vota = false) => ({
+  id,
+  usuario,
+  nombre,
   puesto: "",
-  depto: "",
+  depto,
+  correo: "",
+  rol: "colaborador",
+  clave: "clave123",
+  nomina: true,
+  vota,
+  activo: true
+});
+const adm = (id, usuario, nombre, depto) => ({
+  id,
+  usuario,
+  nombre,
+  puesto: "",
+  depto,
   correo: "",
   rol: "admin",
   clave: "admin123",
   nomina: true,
   vota: true,
   activo: true
-}, {
-  id: "a2",
-  usuario: "MBarrantes",
-  nombre: "M. Barrantes",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "admin",
-  clave: "admin123",
-  nomina: true,
-  vota: true,
-  activo: true
-}, {
-  id: "u1",
-  usuario: "JAcuña",
-  nombre: "J. Acuña",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: true,
-  vota: true,
-  activo: true
-}, {
-  id: "u2",
-  usuario: "SSolis",
-  nombre: "S. Solís",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: true,
-  vota: false,
-  activo: true
-}, {
-  id: "u3",
-  usuario: "MUreña",
-  nombre: "M. Ureña",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: false,
-  vota: false,
-  activo: true
-}, {
-  id: "u4",
-  usuario: "ABrenes",
-  nombre: "A. Brenes",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: false,
-  vota: true,
-  activo: true
-}, {
-  id: "u5",
-  usuario: "TMolina",
-  nombre: "T. Molina",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: false,
-  vota: false,
-  activo: true
-}, {
-  id: "u6",
-  usuario: "YSoto",
-  nombre: "Y. Soto",
-  puesto: "",
-  depto: "",
-  correo: "",
-  rol: "colaborador",
-  clave: "clave123",
-  nomina: false,
-  vota: false,
-  activo: true
-}];
+});
+const PERSONAS = [/* Purchasing and Planning */
+col("u5", "TMolina", "Tracy Molina", "Purchasing and Planning"), col("u6", "YSoto", "Yisley Soto", "Purchasing and Planning"), col("u7", "JVasquez", "Jose Vasquez", "Purchasing and Planning"), col("u8", "YValverde", "Yuliana Valverde", "Purchasing and Planning"), col("u9", "JAguirre", "Jennifer Aguirre", "Purchasing and Planning"), col("u10", "EArtavia", "Eduardo Artavia", "Purchasing and Planning"), col("u11", "KVillalobos", "Kevin Villalobos", "Purchasing and Planning"), col("u12", "ADAmbrosio", "Arnaldo D´Ambrosio", "Purchasing and Planning"), /* Supply Chain Engineer */
+col("u13", "RFuentes", "Raul Fuentes", "Supply Chain Engineer"), adm("a2", "MBarrantes", "Marcos Barrantes", "Supply Chain Engineer"), /* Distribution */
+col("u3", "MUreña", "Marilyn Ureña", "Distribution"), adm("a1", "MSirias", "Michael Sirias", "Distribution"), col("u4", "ABrenes", "Adriana Brenes", "Distribution"), col("u2", "SSolis", "Sebastian Solis", "Distribution"), col("u1", "JAcuña", "Jose Acuña", "Distribution"), /* Customer */
+col("u14", "IRuiz", "Ivan Ruiz", "Customer"), col("u15", "CCorrales", "Carolina Corrales", "Customer"), col("u16", "JDelgado", "Juan Diego Delgado", "Customer"), col("u17", "CMena", "Celeste Mena", "Customer"), col("u18", "KQuesada", "Keyrin Quesada", "Customer"), col("u19", "ARuiz", "Adrianelis Ruiz", "Customer"), col("u20", "TBarrantes", "Tatiana Barrantes", "Customer"), col("u21", "CMontero", "Carolina Montero", "Customer"), col("u24", "VFlores", "Victor Flores", "Customer"), col("u25", "VBarrientos", "Viviana Barrientos", "Customer"), /* Import */
+col("u22", "EGamboa", "Eugenia Gamboa", "Import"), col("u23", "CAraya", "Carolina Araya", "Import"), /* Warehouse */
+col("u26", "JArce", "Jairo Arce", "Warehouse"), /* Dirección */
+col("u27", "CSolis", "Christian Solis", "Supply Chain Director", true)];
 const CATS_PREMIO = ["Capacitación", "Mercancía", "Tiempo", "Experiencia", "Tarjetas", "Tecnología"];
 
 /* Costos reescalados a la economía de 20 y 40 puntos por ciclo.
@@ -1480,7 +1435,7 @@ function semilla() {
     });
   });
   /* algunos votos ya emitidos */
-  [["Quality Hero", "u4", "a1"], ["Quality Hero", "u4", "u1"], ["Quality Hero", "u5", "a2"], ["Innovation Hero", "u2", "a1"], ["Innovation Hero", "u6", "u4"], ["MVP", "u1", "a1"], ["MVP", "u1", "a2"]].forEach(([cat, persona, por]) => {
+  [["Quality Hero", "u4", "a1"], ["Quality Hero", "u4", "u27"], ["Quality Hero", "u5", "a2"], ["Innovation Hero", "u2", "a1"], ["Innovation Hero", "u6", "u27"], ["MVP", "u1", "a1"], ["MVP", "u1", "a2"]].forEach(([cat, persona, por]) => {
     votos.push({
       id: id(),
       ciclo: "c2",
@@ -2636,21 +2591,21 @@ function Nominar({
     rows: 2,
     value: contexto,
     onChange: e => setContexto(e.target.value),
-    placeholder: "Qué estaba pasando. Ejemplo: un lote salía con el etiquetado equivocado y ya estaba en la rampa de carga."
+    placeholder: "Qué estaba pasando."
   })), /*#__PURE__*/React.createElement(Campo, {
     label: "Acción"
   }, /*#__PURE__*/React.createElement("textarea", {
     rows: 2,
     value: accion,
     onChange: e => setAccion(e.target.value),
-    placeholder: "Qué hizo esta persona. Ejemplo: detuvo el despacho, revisó el lote completo y corrigió las etiquetas."
+    placeholder: "Qué hizo esta persona."
   })), /*#__PURE__*/React.createElement(Campo, {
     label: "Resultado"
   }, /*#__PURE__*/React.createElement("textarea", {
     rows: 2,
     value: resultado,
     onChange: e => setResultado(e.target.value),
-    placeholder: "En qué terminó. Ejemplo: el cliente recibió todo correcto y se evitó un reclamo."
+    placeholder: "En qué terminó."
   })), /*#__PURE__*/React.createElement("button", {
     className: "b oro",
     onClick: enviar
@@ -3216,11 +3171,21 @@ function Personas({
     if (!p.nombre.trim() || !p.usuario) return avisar("Falta el nombre o el usuario");
     const repetido = datos.personas.some(x => x.usuario === p.usuario && x.id !== p.id);
     if (repetido) return avisar("Ese usuario ya existe");
-    setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
-      personas: p.id ? d.personas.map(x => x.id === p.id ? p : x) : [...d.personas, _objectSpread(_objectSpread({}, p), {}, {
-        id: id()
-      })]
-    }));
+    setDatos(d => {
+      /* Si aquí se cambia la contraseña inicial, se borra la que se haya puesto en Ajustes;
+         de lo contrario la persona seguiría entrando con la anterior. */
+      const antes = d.personas.find(x => x.id === p.id);
+      const cl = _objectSpread({}, d.config.claves);
+      if (antes && antes.clave !== p.clave) delete cl[p.id];
+      return _objectSpread(_objectSpread({}, d), {}, {
+        config: _objectSpread(_objectSpread({}, d.config), {}, {
+          claves: cl
+        }),
+        personas: p.id ? d.personas.map(x => x.id === p.id ? p : x) : [...d.personas, _objectSpread(_objectSpread({}, p), {}, {
+          id: id()
+        })]
+      });
+    });
     avisar(p.id ? "Cambios guardados" : `${p.nombre} agregada al programa`);
     setEdita(null);
   };
@@ -3277,9 +3242,9 @@ function Personas({
     className: "etq esp"
   }, "Coordinación"), p.vota && /*#__PURE__*/React.createElement("span", {
     className: "etq list"
-  }, "Jurado"), p.nomina && !p.vota && /*#__PURE__*/React.createElement("span", {
+  }, "Jurado"), !p.nomina && /*#__PURE__*/React.createElement("span", {
     className: "etq gris"
-  }, "Nomina"))), /*#__PURE__*/React.createElement("td", {
+  }, "No nomina"))), /*#__PURE__*/React.createElement("td", {
     style: {
       color: "var(--soft)"
     }
@@ -3937,22 +3902,50 @@ function Ajustes({
     }) : p)
   }));
   const [c, setC] = useState(datos.config);
-  const [nueva, setNueva] = useState("");
   const [confirma, setConfirma] = useState(false);
   const [limpia, setLimpia] = useState(false);
+  const [claves, setClaves] = useState({});
+
+  /* Se escribe sobre la config más reciente, no sobre la copia local: así no se pierden
+     las contraseñas que se hayan cambiado en la tabla de abajo. */
   const guardar = () => {
-    const cfg = _objectSpread({}, c);
-    if (nueva.trim()) {
-      if (nueva.trim().length < 6) return avisar("La contraseña debe tener al menos 6 caracteres");
-      cfg.claves = _objectSpread(_objectSpread({}, cfg.claves), {}, {
-        [yo.id]: hash(nueva.trim())
-      });
-    }
     setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
-      config: cfg
+      config: _objectSpread(_objectSpread({}, d.config), {}, {
+        programa: c.programa,
+        empresa: c.empresa
+      })
     }));
-    setNueva("");
     avisar("Ajustes guardados");
+  };
+  const escribirClave = (pid, texto) => setClaves(x => _objectSpread(_objectSpread({}, x), {}, {
+    [pid]: texto
+  }));
+  const cambiarClave = p => {
+    const texto = (claves[p.id] || "").trim();
+    if (!texto) return avisar("Escriba la contraseña nueva");
+    if (texto.length < 6) return avisar("La contraseña debe tener al menos 6 caracteres");
+    setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
+      config: _objectSpread(_objectSpread({}, d.config), {}, {
+        claves: _objectSpread(_objectSpread({}, d.config.claves), {}, {
+          [p.id]: hash(texto)
+        })
+      })
+    }));
+    escribirClave(p.id, "");
+    avisar(`Contraseña de ${p.nombre} cambiada`);
+  };
+  const devolverClave = p => {
+    setDatos(d => {
+      const cl = _objectSpread({}, d.config.claves);
+      delete cl[p.id];
+      return _objectSpread(_objectSpread({}, d), {}, {
+        config: _objectSpread(_objectSpread({}, d.config), {}, {
+          claves: cl
+        })
+      });
+    });
+    escribirClave(p.id, "");
+    avisar(`${p.nombre} vuelve a su contraseña inicial`);
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "bloque"
@@ -4021,17 +4014,92 @@ function Ajustes({
     }
   }, "Quien no tenga ninguna marca solo ve su saldo y el catálogo de premios. Un jurado nominado en una categoría no vota en esa categoría.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
-  }, /*#__PURE__*/React.createElement("h2", null, "Mi contraseña"), /*#__PURE__*/React.createElement(Campo, {
-    label: "Nueva contraseña (mínimo 6 caracteres)"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "password",
-    value: nueva,
-    onChange: e => setNueva(e.target.value),
-    placeholder: "Déjela vacía para no cambiarla"
-  })), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("h2", null, "Contraseñas del equipo"), /*#__PURE__*/React.createElement("p", {
+    className: "pie"
+  }, "Escriba la contraseña nueva en la fila de la persona y presione Cambiar. La persona la usa la próxima vez que entre. Mínimo 6 caracteres."), /*#__PURE__*/React.createElement("div", {
+    className: "scroll"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "tabla-claves"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Persona"), /*#__PURE__*/React.createElement("th", {
+    className: "ancho"
+  }, "Hoy entra con"), /*#__PURE__*/React.createElement("th", {
+    className: "col-clave"
+  }, "Contraseña nueva"), /*#__PURE__*/React.createElement("th", {
+    className: "acciones"
+  }))), /*#__PURE__*/React.createElement("tbody", null, datos.personas.map(p => {
+    const cambiada = !!datos.config.claves[p.id];
+    const entraCon = cambiada ? /*#__PURE__*/React.createElement("span", {
+      className: "etq list"
+    }, "Contraseña cambiada") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: "var(--mono)",
+        fontSize: 12.5
+      }
+    }, p.clave);
+    return /*#__PURE__*/React.createElement("tr", {
+      key: p.id
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, p.nombre), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        color: "var(--soft)"
+      }
+    }, p.usuario, p.rol === "admin" ? " · Coordinación" : "", !p.activo ? " · inactiva" : ""), /*#__PURE__*/React.createElement("div", {
+      className: "angosto",
+      style: {
+        marginTop: 5
+      }
+    }, cambiada ? /*#__PURE__*/React.createElement("span", {
+      className: "etq list"
+    }, "Cambiada") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: "var(--mono)",
+        fontSize: 12.5
+      }
+    }, p.clave))), /*#__PURE__*/React.createElement("td", {
+      className: "ancho"
+    }, entraCon), /*#__PURE__*/React.createElement("td", {
+      className: "col-clave"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "password",
+      autoComplete: "new-password",
+      className: "clave-nueva",
+      value: claves[p.id] || "",
+      "aria-label": `Contraseña nueva de ${p.nombre}`,
+      onChange: e => escribirClave(p.id, e.target.value),
+      onKeyDown: e => {
+        if (e.key === "Enter") cambiarClave(p);
+      },
+      style: {
+        width: "100%",
+        minWidth: 150,
+        padding: "8px 10px",
+        border: "2px solid var(--ink)",
+        borderRadius: 2,
+        background: "var(--card)"
+      }
+    })), /*#__PURE__*/React.createElement("td", {
+      className: "acciones",
+      style: {
+        whiteSpace: "nowrap"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "b oro chico",
+      onClick: () => cambiarClave(p)
+    }, "Cambiar"), " ", cambiada && /*#__PURE__*/React.createElement("button", {
+      className: "b hueco chico",
+      onClick: () => devolverClave(p)
+    }, "Restablecer")));
+  })))), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: "var(--soft)",
+      margin: "14px 0 0"
+    }
+  }, "Una vez cambiada, la contraseña ya no se puede volver a ver: anótela cuando se la entregue a la persona. Si se le olvida, use ", /*#__PURE__*/React.createElement("b", null, "Restablecer"), " y vuelve a la contraseña inicial que aparece en esta misma tabla."), /*#__PURE__*/React.createElement("div", {
     className: "nota",
     style: {
-      marginBottom: 0
+      marginBottom: 0,
+      marginTop: 16
     }
   }, /*#__PURE__*/React.createElement("b", null, "Esta versión no protege información real"), "Las contraseñas se validan dentro del navegador. Sirve para mostrar el flujo, pero cualquiera con la consola abierta puede ver los datos. Para usarlo de verdad hacen falta servidor, contraseñas cifradas y sesiones.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
