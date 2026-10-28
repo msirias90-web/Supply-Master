@@ -587,20 +587,6 @@ const CSS = `
 .rec .relato.compacto .txt-parte{color:#C8D0CD;}
 @media (max-width:620px){ .rec .relato .parte{grid-template-columns:1fr;gap:1px;} }
 
-/* Tabla de contraseñas: en el teléfono se esconde la columna "Hoy entra con" y ese dato
-   pasa debajo del nombre, para que el botón Cambiar quepa sin tener que deslizar. */
-.rec .angosto{display:none;}
-@media (max-width:620px){
-  .rec .ancho{display:none;}
-  .rec .angosto{display:block;}
-  .rec .clave-nueva{width:88px!important;min-width:0!important;padding:8px 7px!important;}
-  .rec .tabla-claves{width:100%;table-layout:fixed;}
-  .rec .tabla-claves td,.rec .tabla-claves th{padding-left:7px;padding-right:7px;
-    overflow-wrap:anywhere;vertical-align:middle;}
-  .rec .tabla-claves .acciones{white-space:nowrap!important;width:114px;}
-  .rec .tabla-claves .col-clave{width:102px;}
-  .rec .tabla-claves .acciones .b{display:block;width:100%;margin:0 0 5px;padding-left:4px;padding-right:4px;}
-}
 .rec .nominado .quien-nom{font-size:12px;color:var(--soft);margin-top:6px;}
 .rec .nominado.sorteo{box-shadow:inset 4px 0 0 var(--oro-claro);transform:scale(1.015);}
 .rec .nominado.apagado{opacity:.38;}
@@ -669,8 +655,11 @@ const CSS = `
   .rec .barra-in{gap:10px;padding:11px 16px;}
   .rec .logo{height:26px;}
   .rec .programa{font-size:14.5px;white-space:nowrap;}
-  /* en pantalla angosta el nombre propio sobra: la persona ya sabe quién es */
+  /* en pantalla angosta el nombre propio sobra: la persona ya sabe quién es, y el
+     nombre del programa también, porque el logo ya está al lado */
   .rec .quien{display:none;}
+  .rec .programa{display:none;}
+  .rec .barra-in .salir{padding:7px 10px;font-size:12.5px;white-space:nowrap;}
   .rec .wrap{padding:0 16px;}
   .rec .menu-in{padding:0 16px;}
 }
@@ -3302,7 +3291,7 @@ function Personas({
     })),
     placeholder: "mrojas"
   })), /*#__PURE__*/React.createElement(Campo, {
-    label: "Contraseña inicial"
+    label: edita.id ? "Contraseña (cámbiela si la olvidó)" : "Contraseña inicial"
   }, /*#__PURE__*/React.createElement("input", {
     value: edita.clave,
     onChange: e => setEdita(_objectSpread(_objectSpread({}, edita), {}, {
@@ -3886,6 +3875,94 @@ function Canjes({
   }))));
 }
 
+/* ====================== contraseña propia ====================== */
+
+/* Cada persona cambia la suya, desde el botón del encabezado. Pide la actual
+   para que nadie la cambie en una sesión que quedó abierta. */
+function MiClave({
+  datos,
+  yo,
+  setDatos,
+  avisar,
+  cerrar
+}) {
+  const [actual, setActual] = useState("");
+  const [nueva, setNueva] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    var _ref$current2;
+    return (_ref$current2 = ref.current) === null || _ref$current2 === void 0 ? void 0 : _ref$current2.focus();
+  }, []);
+  const guardar = () => {
+    const esperado = datos.config.claves[yo.id] || hash(yo.clave);
+    if (hash(actual) !== esperado) return avisar("La contraseña actual no es correcta");
+    if (nueva.length < 6) return avisar("La nueva debe tener al menos 6 caracteres");
+    if (nueva !== repetir) return avisar("Las dos contraseñas nuevas no son iguales");
+    if (hash(nueva) === esperado) return avisar("La nueva es igual a la que ya tenía");
+    setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
+      config: _objectSpread(_objectSpread({}, d.config), {}, {
+        claves: _objectSpread(_objectSpread({}, d.config.claves), {}, {
+          [yo.id]: hash(nueva)
+        })
+      })
+    }));
+    avisar("Su contraseña quedó cambiada");
+    cerrar();
+  };
+  const alTeclear = e => {
+    if (e.key === "Enter") guardar();
+  };
+  return /*#__PURE__*/React.createElement(Modal, {
+    titulo: "Mi contraseña",
+    cerrar: cerrar,
+    pie: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "b hueco",
+      onClick: cerrar
+    }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+      className: "b oro",
+      onClick: guardar
+    }, "Cambiar mi contraseña"))
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "0 0 16px",
+      color: "var(--soft)",
+      fontSize: 13.5
+    }
+  }, "Entra como ", /*#__PURE__*/React.createElement("b", null, yo.usuario), ". La nueva contraseña la usa desde la próxima vez que entre."), /*#__PURE__*/React.createElement(Campo, {
+    label: "Contraseña actual"
+  }, /*#__PURE__*/React.createElement("input", {
+    ref: ref,
+    type: "password",
+    autoComplete: "current-password",
+    value: actual,
+    onChange: e => setActual(e.target.value),
+    onKeyDown: alTeclear
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Contraseña nueva (mínimo 6 caracteres)"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    autoComplete: "new-password",
+    value: nueva,
+    onChange: e => setNueva(e.target.value),
+    onKeyDown: alTeclear
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Repita la contraseña nueva"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    autoComplete: "new-password",
+    value: repetir,
+    onChange: e => setRepetir(e.target.value),
+    onKeyDown: alTeclear
+  })), /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "4px 0 0",
+      color: "var(--soft)",
+      fontSize: 12.5
+    }
+  }, "Anótela en un lugar seguro: nadie puede verla después. Si la olvida, Coordinación le pone una nueva desde Personas."));
+}
+
 /* ====================== ajustes ====================== */
 
 function Ajustes({
@@ -3904,10 +3981,9 @@ function Ajustes({
   const [c, setC] = useState(datos.config);
   const [confirma, setConfirma] = useState(false);
   const [limpia, setLimpia] = useState(false);
-  const [claves, setClaves] = useState({});
 
-  /* Se escribe sobre la config más reciente, no sobre la copia local: así no se pierden
-     las contraseñas que se hayan cambiado en la tabla de abajo. */
+  /* Se escribe sobre la config más reciente, no sobre la copia local: así no se pierde
+     ninguna contraseña que alguien haya cambiado mientras esta pantalla estaba abierta. */
   const guardar = () => {
     setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
       config: _objectSpread(_objectSpread({}, d.config), {}, {
@@ -3916,36 +3992,6 @@ function Ajustes({
       })
     }));
     avisar("Ajustes guardados");
-  };
-  const escribirClave = (pid, texto) => setClaves(x => _objectSpread(_objectSpread({}, x), {}, {
-    [pid]: texto
-  }));
-  const cambiarClave = p => {
-    const texto = (claves[p.id] || "").trim();
-    if (!texto) return avisar("Escriba la contraseña nueva");
-    if (texto.length < 6) return avisar("La contraseña debe tener al menos 6 caracteres");
-    setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
-      config: _objectSpread(_objectSpread({}, d.config), {}, {
-        claves: _objectSpread(_objectSpread({}, d.config.claves), {}, {
-          [p.id]: hash(texto)
-        })
-      })
-    }));
-    escribirClave(p.id, "");
-    avisar(`Contraseña de ${p.nombre} cambiada`);
-  };
-  const devolverClave = p => {
-    setDatos(d => {
-      const cl = _objectSpread({}, d.config.claves);
-      delete cl[p.id];
-      return _objectSpread(_objectSpread({}, d), {}, {
-        config: _objectSpread(_objectSpread({}, d.config), {}, {
-          claves: cl
-        })
-      });
-    });
-    escribirClave(p.id, "");
-    avisar(`${p.nombre} vuelve a su contraseña inicial`);
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "bloque"
@@ -4014,94 +4060,12 @@ function Ajustes({
     }
   }, "Quien no tenga ninguna marca solo ve su saldo y el catálogo de premios. Un jurado nominado en una categoría no vota en esa categoría.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
-  }, /*#__PURE__*/React.createElement("h2", null, "Contraseñas del equipo"), /*#__PURE__*/React.createElement("p", {
-    className: "pie"
-  }, "Escriba la contraseña nueva en la fila de la persona y presione Cambiar. La persona la usa la próxima vez que entre. Mínimo 6 caracteres."), /*#__PURE__*/React.createElement("div", {
-    className: "scroll"
-  }, /*#__PURE__*/React.createElement("table", {
-    className: "tabla-claves"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Persona"), /*#__PURE__*/React.createElement("th", {
-    className: "ancho"
-  }, "Hoy entra con"), /*#__PURE__*/React.createElement("th", {
-    className: "col-clave"
-  }, "Contraseña nueva"), /*#__PURE__*/React.createElement("th", {
-    className: "acciones"
-  }))), /*#__PURE__*/React.createElement("tbody", null, datos.personas.map(p => {
-    const cambiada = !!datos.config.claves[p.id];
-    const entraCon = cambiada ? /*#__PURE__*/React.createElement("span", {
-      className: "etq list"
-    }, "Contraseña cambiada") : /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "var(--mono)",
-        fontSize: 12.5
-      }
-    }, p.clave);
-    return /*#__PURE__*/React.createElement("tr", {
-      key: p.id
-    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, p.nombre), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 12.5,
-        color: "var(--soft)"
-      }
-    }, p.usuario, p.rol === "admin" ? " · Coordinación" : "", !p.activo ? " · inactiva" : ""), /*#__PURE__*/React.createElement("div", {
-      className: "angosto",
-      style: {
-        marginTop: 5
-      }
-    }, cambiada ? /*#__PURE__*/React.createElement("span", {
-      className: "etq list"
-    }, "Cambiada") : /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontFamily: "var(--mono)",
-        fontSize: 12.5
-      }
-    }, p.clave))), /*#__PURE__*/React.createElement("td", {
-      className: "ancho"
-    }, entraCon), /*#__PURE__*/React.createElement("td", {
-      className: "col-clave"
-    }, /*#__PURE__*/React.createElement("input", {
-      type: "password",
-      autoComplete: "new-password",
-      className: "clave-nueva",
-      value: claves[p.id] || "",
-      "aria-label": `Contraseña nueva de ${p.nombre}`,
-      onChange: e => escribirClave(p.id, e.target.value),
-      onKeyDown: e => {
-        if (e.key === "Enter") cambiarClave(p);
-      },
-      style: {
-        width: "100%",
-        minWidth: 150,
-        padding: "8px 10px",
-        border: "2px solid var(--ink)",
-        borderRadius: 2,
-        background: "var(--card)"
-      }
-    })), /*#__PURE__*/React.createElement("td", {
-      className: "acciones",
-      style: {
-        whiteSpace: "nowrap"
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      className: "b oro chico",
-      onClick: () => cambiarClave(p)
-    }, "Cambiar"), " ", cambiada && /*#__PURE__*/React.createElement("button", {
-      className: "b hueco chico",
-      onClick: () => devolverClave(p)
-    }, "Restablecer")));
-  })))), /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("h2", null, "Contraseñas"), /*#__PURE__*/React.createElement("p", {
+    className: "pie",
     style: {
-      fontSize: 13,
-      color: "var(--soft)",
-      margin: "14px 0 0"
+      marginBottom: 0
     }
-  }, "Una vez cambiada, la contraseña ya no se puede volver a ver: anótela cuando se la entregue a la persona. Si se le olvida, use ", /*#__PURE__*/React.createElement("b", null, "Restablecer"), " y vuelve a la contraseña inicial que aparece en esta misma tabla."), /*#__PURE__*/React.createElement("div", {
-    className: "nota",
-    style: {
-      marginBottom: 0,
-      marginTop: 16
-    }
-  }, /*#__PURE__*/React.createElement("b", null, "Esta versión no protege información real"), "Las contraseñas se validan dentro del navegador. Sirve para mostrar el flujo, pero cualquiera con la consola abierta puede ver los datos. Para usarlo de verdad hacen falta servidor, contraseñas cifradas y sesiones.")), /*#__PURE__*/React.createElement("div", {
+  }, "Cada persona cambia la suya desde el botón ", /*#__PURE__*/React.createElement("b", null, "Mi contraseña"), ", arriba a la derecha. Si alguien la olvida, entre a ", /*#__PURE__*/React.createElement("b", null, "Personas"), ", presione Editar en esa persona y escriba una nueva en el campo de contraseña.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Empezar en limpio"), /*#__PURE__*/React.createElement("p", {
     className: "pie"
@@ -4165,6 +4129,7 @@ function Programa() {
   const [cargando, setCargando] = useState(true);
   const [falloGuardado, setFalloGuardado] = useState(false);
   const [yo, setYo] = useState(null);
+  const [verClave, setVerClave] = useState(false);
   const [seccion, setSeccion] = useState("resumen");
   const [aviso, setAviso] = useState("");
   const inicial = () => {
@@ -4572,6 +4537,9 @@ function Programa() {
     className: "quien"
   }, quien.nombre), /*#__PURE__*/React.createElement("button", {
     className: "salir",
+    onClick: () => setVerClave(true)
+  }, "Mi contraseña"), /*#__PURE__*/React.createElement("button", {
+    className: "salir",
     onClick: () => setYo(null)
   }, "Salir"))), /*#__PURE__*/React.createElement("nav", {
     className: "menu"
@@ -4647,7 +4615,13 @@ function Programa() {
     avisar: avisar,
     reiniciar: reiniciar,
     limpiarHistorial: limpiarHistorial
-  })), aviso && /*#__PURE__*/React.createElement("div", {
+  })), verClave && /*#__PURE__*/React.createElement(MiClave, {
+    datos: datos,
+    yo: quien,
+    setDatos: setDatos,
+    avisar: avisar,
+    cerrar: () => setVerClave(false)
+  }), aviso && /*#__PURE__*/React.createElement("div", {
     className: "aviso"
   }, aviso));
 }
