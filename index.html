@@ -469,6 +469,13 @@ const CSS = `
 .rec tbody tr:last-child td{border-bottom:none;}
 .rec tbody tr:hover{background:#FBF9F3;}
 .rec .der{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+/* Encabezado que ordena la tabla al presionarlo. */
+.rec th .orden{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;
+  display:inline-flex;align-items:center;gap:6px;}
+.rec th .orden:hover{color:var(--oro-claro);}
+.rec th.der .orden{flex-direction:row-reverse;}
+.rec th .flecha{font-size:8.5px;line-height:1;opacity:.55;}
+.rec th .flecha.viva{opacity:1;color:var(--oro-claro);}
 .rec .mas{color:var(--exito);font-weight:600;}
 .rec .menos{color:var(--alerta);font-weight:600;}
 .rec .etq{display:inline-block;font-family:var(--mono);font-size:11.5px;font-weight:500;padding:2px 8px;border:1px solid;border-radius:2px;white-space:nowrap;}
@@ -674,6 +681,10 @@ const hash = t => {
   return String(h);
 };
 const id = () => Math.random().toString(36).slice(2, 10);
+/* Orden alfabético en español: la ñ y los acentos quedan donde corresponde. */
+const porNombre = (a, b) => a.nombre.localeCompare(b.nombre, "es", {
+  sensitivity: "base"
+});
 /* Separador de miles con punto, como se escribe en Costa Rica. */
 const miles = n => {
   const x = Math.round(Number(n) || 0);
@@ -1452,6 +1463,460 @@ const CONFIG = {
 const LLAVE = "reconoce:datos:v1";
 const LLAVE_IMG = "reconoce:fotos:v1";
 
+/* ====================== la base compartida ======================
+
+   Llene estos dos datos con los de su proyecto de Supabase
+   (Project Settings → API) y todo el equipo trabaja sobre la misma
+   información. Si los deja vacíos, la aplicación sigue funcionando
+   como antes: cada persona con su propia copia en su navegador.      */
+
+const SUPABASE = {
+  url: "",
+  /* https://xxxxxxxxxxxx.supabase.co */
+  clave: "",
+  /* la clave que dice "anon public"  */
+  dominio: "supply-master.invalid"
+};
+
+/* ---- o, en vez de Supabase, su propio Google Drive ----
+
+   Pegue aquí el enlace que le da Apps Script al publicar la aplicación web.
+   Termina en /exec. Si llena este, no hace falta llenar el de arriba.       */
+
+const GOOGLE = {
+  url: "https://script.google.com/macros/s/AKfycbzP0ADisPjnvj3dyF6AXupEhz3yNiS00ZnELap0k0xjdIyvs6rXo_CC4a8y6rBOKqT9hw/exec" /* https://script.google.com/macros/s/AKfy..../exec */
+};
+const LLAVE_SESION = "reconoce:sesion:v1";
+
+/* El usuario TMolina se convierte por dentro en tmolina@supply-master.invalid.
+   Ese dominio no existe a propósito: nunca se le envía correo a nadie. */
+const correoDe = usuario => `${String(usuario || "").trim().toLowerCase()}@${SUPABASE.dominio}`;
+const nubeSupabase = {
+  sesion: null,
+  get activa() {
+    return !!(SUPABASE.url && SUPABASE.clave);
+  },
+  get usuario() {
+    return this.sesion ? this.sesion.usuario : null;
+  },
+  /* En Supabase hay que crear la entrada de cada persona una vez. */
+  get necesitaCuentas() {
+    return true;
+  },
+  /* ---------- lo básico ---------- */
+
+  async pedir(ruta, opciones = {}, conSesion = true) {
+    if (!this.activa) throw new Error("La base compartida no está configurada");
+    const token = conSesion && this.sesion ? this.sesion.access_token : SUPABASE.clave;
+    let r;
+    try {
+      r = await fetch(SUPABASE.url + ruta, _objectSpread(_objectSpread({}, opciones), {}, {
+        headers: _objectSpread({
+          apikey: SUPABASE.clave,
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }, opciones.headers || {})
+      }));
+    } catch (e) {
+      const err = new Error("Sin conexión");
+      err.sinRed = true;
+      throw err;
+    }
+    const texto = await r.text();
+    let cuerpo = null;
+    try {
+      cuerpo = texto ? JSON.parse(texto) : null;
+    } catch (_unused) {
+      cuerpo = texto;
+    }
+    if (!r.ok) {
+      const m = cuerpo && typeof cuerpo === "object" ? cuerpo.message || cuerpo.msg || cuerpo.error_description || cuerpo.error || cuerpo.hint : null;
+      const err = new Error(m || `Error ${r.status}`);
+      err.estado = r.status;
+      throw err;
+    }
+    return cuerpo;
+  },
+  /* ---------- entrar y salir ---------- */
+
+  guardarSesion(s) {
+    this.sesion = s;
+    try {
+      if (s) localStorage.setItem(LLAVE_SESION, JSON.stringify(s));else localStorage.removeItem(LLAVE_SESION);
+    } catch (_unused2) {/* en modo privado puede fallar; no es grave */}
+  },
+  recuperarSesion() {
+    try {
+      const t = localStorage.getItem(LLAVE_SESION);
+      if (t) this.sesion = JSON.parse(t);
+    } catch (_unused3) {
+      this.sesion = null;
+    }
+    return this.sesion;
+  },
+  async entrar(usuario, clave) {
+    const d = await this.pedir("/auth/v1/token?grant_type=password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: correoDe(usuario),
+        password: clave
+      })
+    }, false);
+    this.guardarSesion({
+      access_token: d.access_token,
+      refresh_token: d.refresh_token,
+      vence: Date.now() + (d.expires_in || 3600) * 1000,
+      usuario: String(usuario).trim()
+    });
+    return this.sesion;
+  },
+  salir() {
+    this.guardarSesion(null);
+  },
+  /* El permiso de entrada vence cada hora; se renueva antes de que pase. */
+  async alDia() {
+    if (!this.sesion) return false;
+    if (Date.now() < this.sesion.vence - 120000) return true;
+    try {
+      const d = await this.pedir("/auth/v1/token?grant_type=refresh_token", {
+        method: "POST",
+        body: JSON.stringify({
+          refresh_token: this.sesion.refresh_token
+        })
+      }, false);
+      this.guardarSesion({
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+        vence: Date.now() + (d.expires_in || 3600) * 1000,
+        usuario: this.sesion.usuario
+      });
+      return true;
+    } catch (e) {
+      if (e.sinRed) return true; /* sin red, se reintenta después */
+      this.salir();
+      return false;
+    }
+  },
+  /* ---------- el documento compartido ---------- */
+
+  async leer() {
+    if (!(await this.alDia())) throw new Error("Su sesión venció. Vuelva a entrar.");
+    const f = await this.pedir("/rest/v1/sm_estado?id=eq.1&select=datos,version");
+    /* Sin filas puede ser que la persona no esté en la lista del programa (los
+       permisos de la base le esconden todo) o que falte preparar la base. */
+    if (!f || !f.length) throw new Error("No se pudo leer el programa. Puede ser que su usuario no esté en la lista del " + "programa, o que falte correr el script de preparación en Supabase.");
+    return {
+      datos: f[0].datos,
+      version: f[0].version
+    };
+  },
+  async versionActual() {
+    if (!(await this.alDia())) return null;
+    const f = await this.pedir("/rest/v1/sm_estado?id=eq.1&select=version");
+    return f && f.length ? f[0].version : null;
+  },
+  /* Graba solo si nadie cambió el documento mientras tanto. Devuelve null
+     cuando otra persona se adelantó, para volver a intentar sobre lo suyo. */
+  async grabar(datos, version) {
+    if (!(await this.alDia())) throw new Error("Su sesión venció. Vuelva a entrar.");
+    const f = await this.pedir(`/rest/v1/sm_estado?id=eq.1&version=eq.${version}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify({
+        datos,
+        version: version + 1,
+        actualizado: new Date().toISOString(),
+        actualizado_por: this.usuario || ""
+      })
+    });
+    if (!f || !f.length) return null;
+    return {
+      datos: f[0].datos,
+      version: f[0].version
+    };
+  },
+  async anotar(version, accion) {
+    try {
+      await this.pedir("/rest/v1/sm_bitacora", {
+        method: "POST",
+        headers: {
+          Prefer: "return=minimal"
+        },
+        body: JSON.stringify({
+          version,
+          usuario: (this.usuario || "").toLowerCase(),
+          accion: String(accion).slice(0, 300)
+        })
+      });
+    } catch (_unused4) {/* la bitácora nunca debe frenar el trabajo */}
+  },
+  /* ---------- fotos de los premios ---------- */
+
+  async leerFotos() {
+    const f = await this.pedir("/rest/v1/sm_imagenes?select=premio,dato");
+    const m = {};
+    (f || []).forEach(x => {
+      m[x.premio] = x.dato;
+    });
+    return m;
+  },
+  async grabarFoto(premio, dato) {
+    await this.pedir("/rest/v1/sm_imagenes", {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=minimal"
+      },
+      body: JSON.stringify({
+        premio,
+        dato,
+        actualizado: new Date().toISOString()
+      })
+    });
+  },
+  async borrarFoto(premio) {
+    await this.pedir(`/rest/v1/sm_imagenes?premio=eq.${encodeURIComponent(premio)}`, {
+      method: "DELETE",
+      headers: {
+        Prefer: "return=minimal"
+      }
+    });
+  },
+  /* ---------- contraseñas y cuentas ---------- */
+
+  async cambiarMiClave(nueva) {
+    if (!(await this.alDia())) throw new Error("Su sesión venció. Vuelva a entrar.");
+    await this.pedir("/auth/v1/user", {
+      method: "PUT",
+      body: JSON.stringify({
+        password: nueva
+      })
+    });
+  },
+  /* Crea la cuenta de entrada de una persona nueva. No cambia la sesión
+     de quien la está creando. */
+  async crearCuenta(usuario, clave) {
+    await this.pedir("/auth/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email: correoDe(usuario),
+        password: clave
+      })
+    }, false);
+  },
+  /* Solo coordinación: le pone una contraseña nueva a quien la olvidó. */
+  async reponerClave(usuario, clave) {
+    if (!(await this.alDia())) throw new Error("Su sesión venció. Vuelva a entrar.");
+    await this.pedir("/rest/v1/rpc/sm_reponer_clave", {
+      method: "POST",
+      body: JSON.stringify({
+        p_usuario: String(usuario).trim(),
+        p_clave: clave
+      })
+    });
+  }
+};
+
+/* ====================== la misma base, pero en Google Drive ======================
+
+   Aquí la contraseña la revisa el script que corre en la cuenta de Google:
+   la página nunca recibe contraseñas y sin haber entrado no obtiene nada.
+   Tiene la misma forma que el de Supabase, para que el resto de la
+   aplicación no tenga que saber cuál de los dos está puesto.               */
+
+const LLAVE_SESION_G = "reconoce:sesion-google:v1";
+const nubeGoogle = {
+  sesion: null,
+  get activa() {
+    return !!GOOGLE.url;
+  },
+  get usuario() {
+    return this.sesion ? this.sesion.usuario : null;
+  },
+  /* Las contraseñas las siembra el primer arranque del script. */
+  get necesitaCuentas() {
+    return false;
+  },
+  /* Texto plano a propósito: con JSON el navegador pide permiso previo y
+     Apps Script no sabe contestarlo. El contenido sigue siendo JSON. */
+  async pedir(cuerpo) {
+    let r;
+    try {
+      r = await fetch(GOOGLE.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body: JSON.stringify(cuerpo)
+      });
+    } catch (e) {
+      const err = new Error("Sin conexión");
+      err.sinRed = true;
+      throw err;
+    }
+    const texto = await r.text();
+    let d = null;
+    try {
+      d = texto ? JSON.parse(texto) : null;
+    } catch (_unused5) {
+      d = null;
+    }
+    if (!r.ok || !d) throw new Error(`No se pudo hablar con la base (${r.status})`);
+    if (d.error) throw new Error(d.error);
+    return d;
+  },
+  guardarSesion(s) {
+    this.sesion = s;
+    try {
+      if (s) localStorage.setItem(LLAVE_SESION_G, JSON.stringify(s));else localStorage.removeItem(LLAVE_SESION_G);
+    } catch (_unused6) {/* en modo privado puede fallar; no es grave */}
+  },
+  recuperarSesion() {
+    try {
+      const t = localStorage.getItem(LLAVE_SESION_G);
+      if (t) this.sesion = JSON.parse(t);
+    } catch (_unused7) {
+      this.sesion = null;
+    }
+    if (this.sesion && this.sesion.vence < Date.now()) this.sesion = null;
+    return this.sesion;
+  },
+  async entrar(usuario, clave) {
+    const d = await this.pedir({
+      accion: "entrar",
+      usuario,
+      clave
+    });
+    this.guardarSesion({
+      token: d.token,
+      vence: d.vence,
+      usuario: d.usuario
+    });
+    return this.sesion;
+  },
+  salir() {
+    const t = this.sesion && this.sesion.token;
+    this.guardarSesion(null);
+    if (t) this.pedir({
+      accion: "salir",
+      token: t
+    }).catch(() => {});
+  },
+  alDia() {
+    return Promise.resolve(!!(this.sesion && this.sesion.vence > Date.now()));
+  },
+  async leer() {
+    const d = await this.pedir({
+      accion: "leer",
+      token: this.sesion && this.sesion.token
+    });
+    return {
+      datos: d.datos,
+      version: d.version
+    };
+  },
+  async versionActual() {
+    const d = await this.pedir({
+      accion: "version",
+      token: this.sesion && this.sesion.token
+    });
+    return d.version;
+  },
+  /* Devuelve null cuando otra persona se adelantó, igual que el de Supabase. */
+  async grabar(datos, version, nota) {
+    const d = await this.pedir({
+      accion: "grabar",
+      token: this.sesion && this.sesion.token,
+      datos,
+      version,
+      nota
+    });
+    if (d.conflicto) return null;
+    return {
+      datos: d.datos,
+      version: d.version
+    };
+  },
+  /* El script anota solo, al grabar: aquí no hay nada que mandar aparte. */
+  anotar() {},
+  async leerFotos() {
+    const d = await this.pedir({
+      accion: "leerFotos",
+      token: this.sesion && this.sesion.token
+    });
+    return d.fotos || {};
+  },
+  async grabarFoto(premio, dato) {
+    await this.pedir({
+      accion: "grabarFoto",
+      token: this.sesion && this.sesion.token,
+      premio,
+      dato
+    });
+  },
+  async borrarFoto(premio) {
+    await this.pedir({
+      accion: "borrarFoto",
+      token: this.sesion && this.sesion.token,
+      premio
+    });
+  },
+  async cambiarMiClave(nueva, actual) {
+    await this.pedir({
+      accion: "cambiarClave",
+      token: this.sesion && this.sesion.token,
+      actual,
+      nueva
+    });
+  },
+  async crearCuenta(usuario, clave) {
+    const d = await this.pedir({
+      accion: "crearCuenta",
+      token: this.sesion && this.sesion.token,
+      usuario,
+      clave
+    });
+    if (d.yaTenia) {
+      const e = new Error("User already registered");
+      throw e;
+    }
+  },
+  async reponerClave(usuario, clave) {
+    await this.pedir({
+      accion: "reponerClave",
+      token: this.sesion && this.sesion.token,
+      usuario,
+      clave
+    });
+  }
+};
+
+/* Se usa el que esté configurado. Si no hay ninguno, cada persona trabaja
+   sobre su propia copia en el navegador, como al principio. */
+const nube = GOOGLE.url ? nubeGoogle : nubeSupabase;
+
+/* Describe en una línea qué cambió, para dejarlo anotado en la bitácora.
+   Se saca comparando antes y después: así ninguna pantalla tiene que avisar. */
+function resumirCambio(antes, despues) {
+  if (!antes) return "Cambios en el programa";
+  const partes = [];
+  const cuenta = lista => Array.isArray(lista) ? lista.length : 0;
+  [["nominaciones", "nominación", "nominaciones"], ["votos", "voto", "votos"], ["canjes", "canje", "canjes"], ["movimientos", "movimiento de puntos", "movimientos de puntos"], ["ciclos", "mes", "meses"], ["premios", "premio", "premios"], ["personas", "persona", "personas"]].forEach(([llave, uno, varios]) => {
+    const d = cuenta(despues[llave]) - cuenta(antes[llave]);
+    if (d > 0) partes.push(`${d} ${d === 1 ? uno : varios} más`);else if (d < 0) partes.push(`${-d} ${-d === 1 ? uno : varios} menos`);
+  });
+  if (!partes.length) {
+    if (JSON.stringify(antes.config) !== JSON.stringify(despues.config)) return "Cambió los ajustes";
+    if (JSON.stringify(antes.personas) !== JSON.stringify(despues.personas)) return "Cambió datos de personas";
+    if (JSON.stringify(antes.premios) !== JSON.stringify(despues.premios)) return "Cambió el catálogo de premios";
+    if (JSON.stringify(antes.canjes) !== JSON.stringify(despues.canjes)) return "Cambió el estado de un canje";
+    if (JSON.stringify(antes.ciclos) !== JSON.stringify(despues.ciclos)) return "Cambió un mes";
+    return "Cambios en el programa";
+  }
+  return partes.join(", ");
+}
+
 /* ====================== piezas ====================== */
 
 /* Logotipo corporativo, incrustado para que la aplicación no dependa de un servidor de imágenes. */
@@ -1689,7 +2154,18 @@ const cicloActual = datos => {
   const lista = datos.ciclos || [];
   return lista.length ? lista[lista.length - 1] : null;
 };
-const nominacionesDe = (datos, cicloId, cat) => (datos.nominaciones || []).filter(n => n.ciclo === cicloId && (!cat || n.cat === cat));
+
+/* Siempre en orden alfabético por el nombre del nominado: así la lista no
+   depende de quién nominó primero y nadie queda arriba por llegar antes. */
+const nominacionesDe = (datos, cicloId, cat) => {
+  const nombre = pid => {
+    const p = (datos.personas || []).find(x => x.id === pid);
+    return p ? p.nombre : "";
+  };
+  return (datos.nominaciones || []).filter(n => n.ciclo === cicloId && (!cat || n.cat === cat)).slice().sort((a, b) => nombre(a.persona).localeCompare(nombre(b.persona), "es", {
+    sensitivity: "base"
+  }));
+};
 const votosDe = (datos, cicloId, cat) => (datos.votos || []).filter(v => v.ciclo === cicloId && (!cat || v.cat === cat));
 
 /** Cuántos votos lleva cada nominación de una categoría. */
@@ -1727,7 +2203,13 @@ const ETAPAS = {
 /* Referencia de catálogo: tres letras de la categoría más el costo, como un número de parte. */
 const refPremio = p => `${(p.cat || "GEN").replace(/[^A-Za-zÁÉÍÓÚÑ]/g, "").slice(0, 3).toUpperCase()}-${String(p.costo).padStart(4, "0")}`;
 const saldoDe = (datos, personaId) => (datos.movimientos || []).filter(m => m.persona === personaId).reduce((s, m) => s + m.puntos, 0);
-const ganadosDe = (datos, personaId) => (datos.movimientos || []).filter(m => m.persona === personaId && m.puntos > 0).reduce((s, m) => s + m.puntos, 0);
+
+/* Los ganados cuentan lo que la persona se ganó en el programa: nominaciones,
+   premios de categoría y las correcciones de coordinación, para arriba o para
+   abajo. No cuentan los canjes, ni la devolución de un canje rechazado: esa
+   devolución repone lo que ya tenía, así que solo toca el saldo. */
+const GANA = ["nominacion", "ganador", "ajuste"];
+const ganadosDe = (datos, personaId) => (datos.movimientos || []).filter(m => m.persona === personaId && GANA.indexOf(m.tipo) !== -1).reduce((s, m) => s + m.puntos, 0);
 
 /* ====================== entrada ====================== */
 
@@ -1738,12 +2220,33 @@ function Entrada({
   const [usuario, setUsuario] = useState("");
   const [clave, setClave] = useState("");
   const [mal, setMal] = useState("");
+  const [probando, setProbando] = useState(false);
+  const [estrenando, setEstrenando] = useState(false);
+  const [nueva, setNueva] = useState("");
+  const [repite, setRepite] = useState("");
   const ref = useRef(null);
   useEffect(() => {
     var _ref$current;
     return (_ref$current = ref.current) === null || _ref$current === void 0 ? void 0 : _ref$current.focus();
-  }, []);
-  const intentar = () => {
+  }, [estrenando]);
+  const intentar = async () => {
+    if (probando) return;
+
+    /* Con base compartida, quien decide si la contraseña sirve es Supabase. */
+    if (nube.activa) {
+      setProbando(true);
+      try {
+        await nube.entrar(usuario, clave);
+        await entrar(null);
+      } catch (e) {
+        nube.salir();
+        setMal(e.sinRed ? "No se pudo conectar. Revise la conexión a internet." : "Usuario o contraseña incorrectos.");
+        setClave("");
+      } finally {
+        setProbando(false);
+      }
+      return;
+    }
     const u = datos.personas.find(p => p.usuario.toLowerCase() === usuario.trim().toLowerCase() && p.activo);
     const esperado = u ? datos.config.claves[u.id] || hash(u.clave) : null;
     if (!u || hash(clave) !== esperado) {
@@ -1753,11 +2256,94 @@ function Entrada({
     }
     entrar(u);
   };
+
+  /* La primera vez la persona no tiene entrada creada todavía: la crea ella
+     misma escogiendo su contraseña. Si su usuario no está en la lista del
+     programa, la cuenta queda creada pero no ve absolutamente nada. */
+  const estrenar = async () => {
+    if (probando) return;
+    if (!usuario.trim()) return setMal("Escriba su usuario.");
+    if (nueva.length < 6) return setMal("La contraseña debe tener al menos 6 caracteres.");
+    if (nueva !== repite) return setMal("Las dos contraseñas no son iguales.");
+    setProbando(true);
+    try {
+      await nube.crearCuenta(usuario, nueva);
+      await nube.entrar(usuario, nueva);
+      await entrar(null);
+    } catch (e) {
+      const ya = /already registered|already been registered/i.test(e.message || "");
+      setMal(ya ? "Esa persona ya tiene su entrada creada. Cierre esto y escriba su contraseña." : e.sinRed ? "No se pudo conectar. Revise la conexión a internet." : e.message);
+    } finally {
+      setProbando(false);
+    }
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "entrada"
   }, /*#__PURE__*/React.createElement("div", {
     className: "caja"
-  }, /*#__PURE__*/React.createElement(Logo, null), /*#__PURE__*/React.createElement("h1", null, datos.config.programa), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Logo, null), /*#__PURE__*/React.createElement("h1", null, datos.config.programa), estrenando ? /*#__PURE__*/React.createElement("div", {
+    className: "form"
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "0 0 16px",
+      color: "var(--soft)",
+      fontSize: 13.5
+    }
+  }, "Solo la primera vez. Escoja la contraseña con la que va a entrar de aquí en adelante."), /*#__PURE__*/React.createElement(Campo, {
+    label: "Su usuario"
+  }, /*#__PURE__*/React.createElement("input", {
+    ref: ref,
+    value: usuario,
+    autoCapitalize: "none",
+    placeholder: "TMolina",
+    onChange: e => {
+      setUsuario(e.target.value);
+      setMal("");
+    }
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Contraseña nueva (mínimo 6 caracteres)"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: nueva,
+    autoComplete: "new-password",
+    onChange: e => {
+      setNueva(e.target.value);
+      setMal("");
+    },
+    onKeyDown: e => e.key === "Enter" && estrenar()
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Repita la contraseña"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: repite,
+    autoComplete: "new-password",
+    onChange: e => {
+      setRepite(e.target.value);
+      setMal("");
+    },
+    onKeyDown: e => e.key === "Enter" && estrenar()
+  })), mal && /*#__PURE__*/React.createElement("p", {
+    className: "mal"
+  }, mal), /*#__PURE__*/React.createElement("button", {
+    className: "b oro",
+    style: {
+      width: "100%"
+    },
+    onClick: estrenar,
+    disabled: probando
+  }, probando ? "Creando…" : "Crear mi entrada"), /*#__PURE__*/React.createElement("button", {
+    className: "b hueco",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    onClick: () => {
+      setEstrenando(false);
+      setMal("");
+      setNueva("");
+      setRepite("");
+    }
+  }, "Ya tengo contraseña")) : /*#__PURE__*/React.createElement("div", {
     className: "form"
   }, /*#__PURE__*/React.createElement(Campo, {
     label: "Usuario"
@@ -1787,10 +2373,18 @@ function Entrada({
     style: {
       width: "100%"
     },
-    onClick: intentar
-  }, "Entrar"), /*#__PURE__*/React.createElement("div", {
+    onClick: intentar,
+    disabled: probando
+  }, probando ? "Entrando…" : "Entrar"), nube.activa && nube.necesitaCuentas && /*#__PURE__*/React.createElement("button", {
+    className: "b hueco",
+    style: {
+      width: "100%",
+      marginTop: 10
+    },
+    onClick: () => setEstrenando(true)
+  }, "Es mi primera vez"), /*#__PURE__*/React.createElement("div", {
     className: "claves"
-  }, "Para la demostración: ", /*#__PURE__*/React.createElement("code", null, "MSirias"), " o ", /*#__PURE__*/React.createElement("code", null, "MBarrantes"), " con ", /*#__PURE__*/React.createElement("code", null, "admin123"), ". Los demás entran con su usuario y ", /*#__PURE__*/React.createElement("code", null, "clave123"), "."))));
+  }, "Su usuario es la primera letra de su nombre y su apellido, por ejemplo", " ", /*#__PURE__*/React.createElement("code", null, "TMolina"), ". No distingue mayúsculas."))));
 }
 
 /* ====================== vista del colaborador ====================== */
@@ -2352,7 +2946,7 @@ function CategoriaResultado({
       fontSize: 13,
       color: "var(--soft)"
     }
-  }, lista.length, " ", lista.length === 1 ? "nominado" : "nominados", revelado && ` · ${votosDe(datos, ciclo.id, cat).length} votos`)), /*#__PURE__*/React.createElement("div", {
+  }, lista.length, " ", lista.length === 1 ? "nominado" : "nominados")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 12
     }
@@ -2390,21 +2984,7 @@ function CategoriaResultado({
       }
     }, /*#__PURE__*/React.createElement(Relato, {
       n: a
-    }))), /*#__PURE__*/React.createElement("div", {
-      className: "quien-nom"
-    }, "Nominado por ", nombreDe(n.por))), revelado && /*#__PURE__*/React.createElement("div", {
-      style: {
-        textAlign: "right",
-        flex: "none"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      className: `votos-tag${gana ? " oro" : ""}`
-    }, conteo[n.id] || 0), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 11.5,
-        color: "var(--soft)"
-      }
-    }, (conteo[n.id] || 0) === 1 ? "voto" : "votos"))));
+    }))))));
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 14,
@@ -2508,7 +3088,7 @@ function Nominar({
   }, "Mes de ", ciclo.nombre), /*#__PURE__*/React.createElement("div", {
     className: "vacio"
   }, /*#__PURE__*/React.createElement("b", null, "La nominación ya cerró"), ciclo.estado === "votacion" ? "El mes está en votación. Ya no se pueden agregar nominaciones." : "Este mes ya está cerrado."));
-  const nominables = datos.personas.filter(p => p.activo && p.id !== yo.id);
+  const nominables = datos.personas.filter(p => p.activo && p.id !== yo.id).slice().sort(porNombre);
   const delCat = nominacionesDe(datos, ciclo.id, cat);
   const yaEsta = pid => delCat.find(n => n.persona === pid);
   const enviar = () => {
@@ -2644,13 +3224,13 @@ function Nominar({
       }
     }, n.proyecto), /*#__PURE__*/React.createElement(Relato, {
       n: n
-    }), /*#__PURE__*/React.createElement("div", {
+    }), n.apoyos.length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: "var(--soft)",
         marginTop: 7
       }
-    }, "Nominado por ", nombreDe(n.por), n.apoyos.length > 0 && ` · ${n.apoyos.length} respaldo${n.apoyos.length === 1 ? "" : "s"}`))));
+    }, n.apoyos.length, " respaldo", n.apoyos.length === 1 ? "" : "s"))));
   })));
 }
 
@@ -2763,13 +3343,7 @@ function Votar({
         }
       }, /*#__PURE__*/React.createElement(Relato, {
         n: a
-      }))), /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 12,
-          color: "var(--soft)",
-          marginTop: 6
-        }
-      }, "Nominado por ", nombreDe(n.por))), /*#__PURE__*/React.createElement("button", {
+      })))), /*#__PURE__*/React.createElement("button", {
         className: `b ${elegido ? "oro" : "hueco"} chico`,
         style: {
           flex: "none"
@@ -2945,12 +3519,7 @@ function Ciclos({
       const esGanador = (elegido.ganadores || {})[cat] === n.id;
       return /*#__PURE__*/React.createElement("tr", {
         key: n.id
-      }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, nombreDe(n.persona)), /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 12.5,
-          color: "var(--soft)"
-        }
-      }, "Nominado por ", nombreDe(n.por))), /*#__PURE__*/React.createElement("td", {
+      }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, nombreDe(n.persona))), /*#__PURE__*/React.createElement("td", {
         className: "der"
       }, /*#__PURE__*/React.createElement("b", null, conteo[n.id] || 0)), /*#__PURE__*/React.createElement("td", null, elegido.asignado ? esGanador ? /*#__PURE__*/React.createElement("span", {
         className: "etq list"
@@ -3147,19 +3716,106 @@ const PERSONA_VACIA = {
 function Personas({
   datos,
   setDatos,
+  yo,
   avisar
 }) {
   const [edita, setEdita] = useState(null);
   const [busca, setBusca] = useState("");
   const [detalle, setDetalle] = useState(null);
-  const lista = datos.personas.filter(p => !busca.trim() || `${p.nombre} ${p.usuario} ${p.depto} ${p.puesto}`.toLowerCase().includes(busca.toLowerCase()));
-  const guardar = () => {
+  const [ajusta, setAjusta] = useState(null);
+  const [saldoNuevo, setSaldoNuevo] = useState("");
+  const [razon, setRazon] = useState("");
+
+  /* El historial no se borra ni se corrige: para cuadrar un saldo se agrega
+     un movimiento por la diferencia, con el motivo anotado. */
+  const ajustarSaldo = () => {
+    const actual = saldoDe(datos, ajusta.id);
+    /* Si lo escrito no es un número entero, no se toca nada: un campo vacío o
+       con letras no puede terminar poniéndole cero a alguien. */
+    const limpio = String(saldoNuevo).trim().replace(/[\s.,]/g, "");
+    if (!/^-?\d+$/.test(limpio)) return avisar("Escriba el saldo nuevo en números");
+    const destino = parseInt(limpio, 10);
+    if (destino < 0) return avisar("El saldo no puede quedar en negativo");
+    const dif = destino - actual;
+    if (dif === 0) return avisar("Ese ya es el saldo");
+    if (!razon.trim()) return avisar("Escriba por qué lo está cambiando");
+    setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
+      movimientos: [{
+        id: id(),
+        persona: ajusta.id,
+        tipo: "ajuste",
+        puntos: dif,
+        cat: "",
+        ciclo: "",
+        nota: razon.trim(),
+        fecha: new Date().toISOString(),
+        por: yo && yo.id || ""
+      }, ...d.movimientos]
+    }));
+    avisar(`${ajusta.nombre}: ${dif > 0 ? "+" : ""}${miles(dif)} puntos`);
+    setAjusta(null);
+  };
+
+  /* La tabla se ordena presionando el encabezado. Arranca por nombre, de la A a la Z. */
+  const [orden, setOrden] = useState({
+    col: "nombre",
+    asc: true
+  });
+  const ordenarPor = col => setOrden(o => o.col === col ? {
+    col,
+    asc: !o.asc
+  } : {
+    col,
+    asc: true
+  });
+  const valorDe = (p, col) => {
+    if (col === "ganados") return ganadosDe(datos, p.id);
+    if (col === "saldo") return saldoDe(datos, p.id);
+    if (col === "activo") return p.activo ? 1 : 0;
+    return String(p[col] || "");
+  };
+  const comparar = (a, b) => {
+    const va = valorDe(a, orden.col),
+      vb = valorDe(b, orden.col);
+    const r = typeof va === "number" ? va - vb : va.localeCompare(vb, "es", {
+      sensitivity: "base"
+    });
+    /* A igualdad, el nombre decide, para que el orden no baile entre recargas. */
+    const final = r !== 0 ? r : porNombre(a, b);
+    return orden.asc ? final : -final;
+  };
+  const lista = datos.personas.filter(p => !busca.trim() || `${p.nombre} ${p.usuario} ${p.depto} ${p.puesto}`.toLowerCase().includes(busca.toLowerCase())).slice().sort(comparar);
+
+  /* Función, no componente: así el encabezado no se vuelve a montar en cada cambio. */
+  const cabeza = (col, rotulo, der) => /*#__PURE__*/React.createElement("th", {
+    className: der ? "der" : ""
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "orden",
+    onClick: () => ordenarPor(col),
+    title: `Ordenar por ${rotulo.toLowerCase()}`
+  }, /*#__PURE__*/React.createElement("span", null, rotulo), /*#__PURE__*/React.createElement("span", {
+    className: `flecha${orden.col === col ? " viva" : ""}`,
+    "aria-hidden": "true"
+  }, orden.col === col && !orden.asc ? "▼" : "▲")));
+  const guardar = async () => {
     const p = _objectSpread(_objectSpread({}, edita), {}, {
       usuario: edita.usuario.trim().toLowerCase()
     });
     if (!p.nombre.trim() || !p.usuario) return avisar("Falta el nombre o el usuario");
     const repetido = datos.personas.some(x => x.usuario === p.usuario && x.id !== p.id);
     if (repetido) return avisar("Ese usuario ya existe");
+
+    /* Con base compartida hay que crear o corregir también la cuenta de entrada. */
+    if (nube.activa) {
+      const antes = datos.personas.find(x => x.id === p.id);
+      if ((p.clave || "").length < 6) return avisar("La contraseña debe tener al menos 6 caracteres");
+      try {
+        if (!antes) await nube.crearCuenta(p.usuario, p.clave);else if (antes.clave !== p.clave) await nube.reponerClave(p.usuario, p.clave);
+      } catch (e) {
+        const ya = /already|registered|exists/i.test(e.message || "");
+        if (!ya) return avisar(e.message || "No se pudo crear la cuenta de entrada");
+      }
+    }
     setDatos(d => {
       /* Si aquí se cambia la contraseña inicial, se borra la que se haya puesto en Ajustes;
          de lo contrario la persona seguiría entrando con la anterior. */
@@ -3178,7 +3834,8 @@ function Personas({
     avisar(p.id ? "Cambios guardados" : `${p.nombre} agregada al programa`);
     setEdita(null);
   };
-  const exportar = () => csv("personas.csv", [["Usuario", "Nombre", "Puesto", "Departamento", "Correo", "Rol", "Nomina", "Vota", "Activo", "Ganados", "Saldo"], ...datos.personas.map(p => [p.usuario, p.nombre, p.puesto, p.depto, p.correo, p.rol, p.nomina ? "Sí" : "No", p.vota ? "Sí" : "No", p.activo ? "Sí" : "No", ganadosDe(datos, p.id), saldoDe(datos, p.id)])]);
+  const exportar = () => csv("personas.csv", [["Usuario", "Nombre", "Puesto", "Departamento", "Correo", "Rol", "Nomina", "Vota", "Activo", "Ganados", "Saldo"], /* Sale en el mismo orden que se ve en la tabla. */
+  ...datos.personas.slice().sort(comparar).map(p => [p.usuario, p.nombre, p.puesto, p.depto, p.correo, p.rol, p.nomina ? "Sí" : "No", p.vota ? "Sí" : "No", p.activo ? "Sí" : "No", ganadosDe(datos, p.id), saldoDe(datos, p.id)])]);
   return /*#__PURE__*/React.createElement("div", {
     className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Personas"), /*#__PURE__*/React.createElement("p", {
@@ -3209,11 +3866,7 @@ function Personas({
     onClick: () => setEdita(_objectSpread({}, PERSONA_VACIA))
   }, "Agregar persona")), /*#__PURE__*/React.createElement("div", {
     className: "scroll"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Nombre"), /*#__PURE__*/React.createElement("th", null, "Usuario"), /*#__PURE__*/React.createElement("th", null, "Departamento"), /*#__PURE__*/React.createElement("th", {
-    className: "der"
-  }, "Ganados"), /*#__PURE__*/React.createElement("th", {
-    className: "der"
-  }, "Saldo"), /*#__PURE__*/React.createElement("th", null, "Estado"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, lista.map(p => /*#__PURE__*/React.createElement("tr", {
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, cabeza("nombre", "Nombre"), cabeza("usuario", "Usuario"), cabeza("depto", "Departamento"), cabeza("ganados", "Ganados", true), cabeza("saldo", "Saldo", true), cabeza("activo", "Estado"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, lista.map(p => /*#__PURE__*/React.createElement("tr", {
     key: p.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, p.nombre), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3256,10 +3909,17 @@ function Personas({
     style: {
       whiteSpace: "nowrap"
     }
-  }, p.rol === "colaborador" && /*#__PURE__*/React.createElement("button", {
+  }, p.rol === "colaborador" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     className: "b hueco chico",
     onClick: () => setDetalle(p)
   }, "Historial"), " ", /*#__PURE__*/React.createElement("button", {
+    className: "b hueco chico",
+    onClick: () => {
+      setAjusta(p);
+      setSaldoNuevo(String(saldoDe(datos, p.id)));
+      setRazon("");
+    }
+  }, "Saldo"), " "), /*#__PURE__*/React.createElement("button", {
     className: "b hueco chico",
     onClick: () => setEdita(_objectSpread({}, p))
   }, "Editar"))))))), edita && /*#__PURE__*/React.createElement(Modal, {
@@ -3395,7 +4055,47 @@ function Personas({
       color: "var(--soft)",
       margin: "14px 0 0"
     }
-  }, "Coordinación administra ciclos, premios y canjes. Un colaborador sin permisos solo ve su saldo y el catálogo.")), detalle && /*#__PURE__*/React.createElement(Modal, {
+  }, "Coordinación administra ciclos, premios y canjes. Un colaborador sin permisos solo ve su saldo y el catálogo.")), ajusta && /*#__PURE__*/React.createElement(Modal, {
+    titulo: `Saldo de ${ajusta.nombre}`,
+    cerrar: () => setAjusta(null),
+    pie: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "b hueco",
+      onClick: () => setAjusta(null)
+    }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+      className: "b oro",
+      onClick: ajustarSaldo
+    }, "Guardar el saldo"))
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "0 0 16px",
+      color: "var(--soft)",
+      fontSize: 13.5
+    }
+  }, "Hoy tiene ", /*#__PURE__*/React.createElement("b", null, miles(saldoDe(datos, ajusta.id))), " puntos. Escriba cuántos debe tener y la aplicación anota la diferencia en su historial."), /*#__PURE__*/React.createElement(Campo, {
+    label: "Saldo que debe quedar"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: saldoNuevo,
+    inputMode: "numeric",
+    onChange: e => setSaldoNuevo(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") ajustarSaldo();
+    }
+  })), /*#__PURE__*/React.createElement(Campo, {
+    label: "Por qué lo está cambiando"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: razon,
+    onChange: e => setRazon(e.target.value),
+    placeholder: "Se le habían cargado puntos de menos en setiembre",
+    onKeyDown: e => {
+      if (e.key === "Enter") ajustarSaldo();
+    }
+  })), /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "4px 0 0",
+      color: "var(--soft)",
+      fontSize: 12.5
+    }
+  }, "El historial no se borra: queda un movimiento con la diferencia y el motivo, para que después se entienda de dónde salió.")), detalle && /*#__PURE__*/React.createElement(Modal, {
     titulo: detalle.nombre,
     cerrar: () => setDetalle(null),
     ancho: 640,
@@ -3466,7 +4166,7 @@ function Premios({
     if (f.size > 8 * 1024 * 1024) return avisar("La foto pesa más de 8 MB");
     try {
       setFoto(await comprimirImagen(f));
-    } catch (_unused) {
+    } catch (_unused8) {
       avisar("No se pudo leer la foto");
     }
     e.target.value = "";
@@ -3489,6 +4189,9 @@ function Premios({
       if (foto) n[pid] = foto;else delete n[pid];
       return n;
     });
+    if (nube.activa) {
+      (foto ? nube.grabarFoto(pid, foto) : nube.borrarFoto(pid)).catch(() => avisar("La foto no se pudo guardar en la base compartida"));
+    }
     avisar(p.id ? "Premio actualizado" : "Premio agregado al catálogo");
     setEdita(null);
     setFoto(null);
@@ -3750,6 +4453,7 @@ function Premios({
           delete n[borra.id];
           return n;
         });
+        if (nube.activa) nube.borrarFoto(borra.id).catch(() => {});
         avisar("Premio eliminado");
         setBorra(null);
       }
@@ -3894,11 +4598,34 @@ function MiClave({
     var _ref$current2;
     return (_ref$current2 = ref.current) === null || _ref$current2 === void 0 ? void 0 : _ref$current2.focus();
   }, []);
-  const guardar = () => {
-    const esperado = datos.config.claves[yo.id] || hash(yo.clave);
-    if (hash(actual) !== esperado) return avisar("La contraseña actual no es correcta");
+  const guardar = async () => {
     if (nueva.length < 6) return avisar("La nueva debe tener al menos 6 caracteres");
     if (nueva !== repetir) return avisar("Las dos contraseñas nuevas no son iguales");
+
+    /* Con base compartida la contraseña vive en Supabase, no en el documento. */
+    if (nube.activa) {
+      if (!actual) return avisar("Escriba su contraseña actual");
+      if (nueva === actual) return avisar("La nueva es igual a la que ya tenía");
+      /* En Supabase hay que volver a entrar para comprobar la actual; con
+         Google la comprueba el propio script, así que basta con mandársela. */
+      if (nube.necesitaCuentas) {
+        try {
+          await nube.entrar(yo.usuario, actual);
+        } catch (_unused9) {
+          return avisar("La contraseña actual no es correcta");
+        }
+      }
+      try {
+        await nube.cambiarMiClave(nueva, actual);
+      } catch (e) {
+        return avisar(e.sinRed ? "Sin conexión: no se pudo cambiar" : e.message || "No se pudo cambiar");
+      }
+      avisar("Su contraseña quedó cambiada");
+      cerrar();
+      return;
+    }
+    const esperado = datos.config.claves[yo.id] || hash(yo.clave);
+    if (hash(actual) !== esperado) return avisar("La contraseña actual no es correcta");
     if (hash(nueva) === esperado) return avisar("La nueva es igual a la que ya tenía");
     setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
       config: _objectSpread(_objectSpread({}, d.config), {}, {
@@ -3981,6 +4708,29 @@ function Ajustes({
   const [c, setC] = useState(datos.config);
   const [confirma, setConfirma] = useState(false);
   const [limpia, setLimpia] = useState(false);
+  const [creando, setCreando] = useState(false);
+  const [reporte, setReporte] = useState("");
+
+  /* Crea en la base compartida la entrada de quien todavía no la tiene.
+     A quien ya la tiene no se le toca nada: su contraseña sigue igual. */
+  const crearFaltantes = async () => {
+    setCreando(true);
+    setReporte("");
+    let nuevas = 0,
+      tenian = 0;
+    const fallaron = [];
+    for (const p of datos.personas.filter(x => x.activo)) {
+      try {
+        await nube.crearCuenta(p.usuario, p.clave);
+        nuevas++;
+      } catch (e) {
+        if (/already registered|already been registered/i.test(e.message || "")) tenian++;else fallaron.push(p.usuario);
+      }
+    }
+    setCreando(false);
+    setReporte(`${nuevas} entrada${nuevas === 1 ? "" : "s"} creada${nuevas === 1 ? "" : "s"}, ` + `${tenian} ya existía${tenian === 1 ? "" : "n"}.` + (fallaron.length ? ` No se pudo con: ${fallaron.join(", ")}.` : ""));
+    avisar(fallaron.length ? "Quedaron entradas sin crear" : "Entradas al día");
+  };
 
   /* Se escribe sobre la config más reciente, no sobre la copia local: así no se pierde
      ninguna contraseña que alguien haya cambiado mientras esta pantalla estaba abierta. */
@@ -4027,7 +4777,7 @@ function Ajustes({
     style: {
       textAlign: "center"
     }
-  }, "Jurado · vota"))), /*#__PURE__*/React.createElement("tbody", null, datos.personas.filter(p => p.activo).map(p => /*#__PURE__*/React.createElement("tr", {
+  }, "Jurado · vota"))), /*#__PURE__*/React.createElement("tbody", null, datos.personas.filter(p => p.activo).slice().sort(porNombre).map(p => /*#__PURE__*/React.createElement("tr", {
     key: p.id
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, p.nombre), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4063,9 +4813,21 @@ function Ajustes({
   }, /*#__PURE__*/React.createElement("h2", null, "Contraseñas"), /*#__PURE__*/React.createElement("p", {
     className: "pie",
     style: {
-      marginBottom: 0
+      marginBottom: nube.activa ? 16 : 0
     }
-  }, "Cada persona cambia la suya desde el botón ", /*#__PURE__*/React.createElement("b", null, "Mi contraseña"), ", arriba a la derecha. Si alguien la olvida, entre a ", /*#__PURE__*/React.createElement("b", null, "Personas"), ", presione Editar en esa persona y escriba una nueva en el campo de contraseña.")), /*#__PURE__*/React.createElement("div", {
+  }, "Cada persona cambia la suya desde el botón ", /*#__PURE__*/React.createElement("b", null, "Mi contraseña"), ", arriba a la derecha. Si alguien la olvida, entre a ", /*#__PURE__*/React.createElement("b", null, "Personas"), ", presione Editar en esa persona y escriba una nueva en el campo de contraseña."), nube.activa && nube.necesitaCuentas && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+    className: "pie"
+  }, "Con base compartida, cada persona necesita su entrada creada una sola vez. Este botón crea de golpe las que falten, con la contraseña que tenga cada quien en Personas, para que nadie pueda apropiarse del usuario de otro."), /*#__PURE__*/React.createElement("button", {
+    className: "b hueco",
+    onClick: crearFaltantes,
+    disabled: creando
+  }, creando ? "Creando…" : "Crear las entradas que falten"), reporte && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: "var(--soft)",
+      margin: "12px 0 0"
+    }
+  }, reporte))), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Empezar en limpio"), /*#__PURE__*/React.createElement("p", {
     className: "pie"
@@ -4124,14 +4886,25 @@ function Ajustes({
 /* ====================== app ====================== */
 
 function Programa() {
-  const [datos, setDatos] = useState(null);
+  const [datos, setDatosCrudo] = useState(null);
   const [imgs, setImgs] = useState({});
   const [cargando, setCargando] = useState(true);
   const [falloGuardado, setFalloGuardado] = useState(false);
   const [yo, setYo] = useState(null);
   const [verClave, setVerClave] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
   const [seccion, setSeccion] = useState("resumen");
   const [aviso, setAviso] = useState("");
+
+  /* Lo que falta mandar a la base compartida. Cada cambio se guarda como una
+     función, no como un resultado: si otra persona grabó primero, la función
+     se vuelve a aplicar sobre lo que ella dejó y no se pierde el trabajo de
+     ninguno de los dos. */
+  const cola = useRef([]);
+  const version = useRef(0);
+  const enviando = useRef(false);
+  const reloj = useRef(null);
+  const datosServidor = useRef(null);
   const inicial = () => {
     const {
       ciclos,
@@ -4192,50 +4965,189 @@ function Programa() {
       config: _objectSpread(_objectSpread({}, base.config), d.config || {})
     };
   };
+
+  /* ---------- guardar: en la base compartida o en el navegador ---------- */
+
+  /* Todos los cambios de la aplicación pasan por aquí. Se ven de una vez en
+     pantalla y se encolan para mandarlos. */
+  const setDatos = cambio => {
+    const fn = typeof cambio === "function" ? cambio : () => cambio;
+    if (nube.activa && nube.sesion) {
+      cola.current.push(fn);
+      clearTimeout(reloj.current);
+      reloj.current = setTimeout(enviar, 400);
+    }
+    setDatosCrudo(d => fn(d));
+  };
+
+  /* Manda lo pendiente. Si otra persona grabó primero, vuelve a leer y aplica
+     lo de uno encima de lo de ella. Lo intenta varias veces antes de rendirse. */
+  const enviar = async () => {
+    if (enviando.current || !cola.current.length) return;
+    enviando.current = true;
+    setSincronizando(true);
+    const tanda = cola.current.slice();
+    let antesDeTodo = datosServidor.current ? datosServidor.current.datos : null;
+    try {
+      let hecho = null;
+      for (let intento = 0; intento < 5 && !hecho; intento++) {
+        const base = intento === 0 && datosServidor.current ? datosServidor.current : await nube.leer();
+        antesDeTodo = base.datos;
+        let nuevo = base.datos;
+        for (const fn of tanda) nuevo = fn(nuevo);
+        hecho = await nube.grabar(nuevo, base.version, resumirCambio(base.datos, nuevo));
+      }
+      if (hecho) {
+        cola.current = cola.current.slice(tanda.length);
+        nube.anotar(hecho.version, resumirCambio(antesDeTodo, hecho.datos));
+        version.current = hecho.version;
+        datosServidor.current = hecho;
+        setDatosCrudo(cola.current.reduce((d, f) => f(d), hecho.datos));
+        setFalloGuardado(false);
+      } else {
+        setFalloGuardado(true);
+      }
+    } catch (e) {
+      setFalloGuardado(true);
+    } finally {
+      enviando.current = false;
+      setSincronizando(false);
+      if (cola.current.length) {
+        clearTimeout(reloj.current);
+        reloj.current = setTimeout(enviar, 1500);
+      }
+    }
+  };
+
+  /* Al abrir: sin base compartida, lo de siempre. Con base compartida, se
+     espera a que la persona entre con su usuario. */
   useEffect(() => {
     (async () => {
+      if (nube.activa) {
+        nube.recuperarSesion();
+        if (nube.sesion) {
+          try {
+            const r = await nube.leer();
+            version.current = r.version;
+            datosServidor.current = r;
+            setDatosCrudo(normalizar(r.datos));
+            try {
+              setImgs(await nube.leerFotos());
+            } catch (_unused0) {
+              setImgs({});
+            }
+            const quien = normalizar(r.datos).personas.find(p => p.usuario.toLowerCase() === String(nube.usuario).toLowerCase());
+            if (quien && quien.activo) {
+              setYo(quien);
+              setSeccion(quien.rol === "admin" ? "resumen" : "saldo");
+            } else {
+              nube.salir();
+            }
+            setCargando(false);
+            return;
+          } catch (_unused1) {
+            nube.salir();
+          }
+        }
+        setDatosCrudo(normalizar(null));
+        setCargando(false);
+        return;
+      }
       let d = null,
         m = {};
       try {
         const r = await window.storage.get(LLAVE);
         d = r ? JSON.parse(r.value) : null;
-      } catch (_unused2) {
+      } catch (_unused10) {
         d = null;
       }
       try {
         const r = await window.storage.get(LLAVE_IMG);
         m = r ? JSON.parse(r.value) : {};
-      } catch (_unused3) {
+      } catch (_unused11) {
         m = {};
       }
-      setDatos(normalizar(d));
+      setDatosCrudo(normalizar(d));
       setImgs(m && typeof m === "object" ? m : {});
       setCargando(false);
     })();
   }, []);
+
+  /* Sin base compartida se guarda en el navegador, igual que antes. */
   useEffect(() => {
-    if (!datos || cargando) return;
+    if (!datos || cargando || nube.activa) return;
     const t = setTimeout(async () => {
       try {
         await window.storage.set(LLAVE, JSON.stringify(datos));
         setFalloGuardado(false);
-      } catch (_unused4) {
+      } catch (_unused12) {
         setFalloGuardado(true);
       }
     }, 450);
     return () => clearTimeout(t);
   }, [datos, cargando]);
   useEffect(() => {
-    if (cargando) return;
+    if (cargando || nube.activa) return;
     const t = setTimeout(async () => {
       try {
         await window.storage.set(LLAVE_IMG, JSON.stringify(imgs));
-      } catch (_unused5) {
+      } catch (_unused13) {
         setFalloGuardado(true);
       }
     }, 650);
     return () => clearTimeout(t);
   }, [imgs, cargando]);
+
+  /* Al entrar: con base compartida se traen los datos frescos y se busca a la
+     persona en la lista. Quien tenga cuenta pero no esté en la lista no pasa. */
+  const entrarComo = async u => {
+    if (!nube.activa) {
+      setYo(u);
+      setSeccion(u.rol === "admin" ? "resumen" : "saldo");
+      return;
+    }
+    const r = await nube.leer();
+    version.current = r.version;
+    datosServidor.current = r;
+    const d = normalizar(r.datos);
+    setDatosCrudo(d);
+    try {
+      setImgs(await nube.leerFotos());
+    } catch (_unused14) {
+      setImgs({});
+    }
+    const quien = d.personas.find(p => p.usuario.toLowerCase() === String(nube.usuario).toLowerCase());
+    if (!quien || !quien.activo) {
+      nube.salir();
+      throw new Error("Su usuario no está en el programa");
+    }
+    setYo(quien);
+    setSeccion(quien.rol === "admin" ? "resumen" : "saldo");
+  };
+  const salirDeTodo = () => {
+    nube.salir();
+    cola.current = [];
+    setYo(null);
+  };
+
+  /* Cada 20 segundos mira si otra persona grabó algo, y lo trae. */
+  useEffect(() => {
+    if (!nube.activa || !yo) return;
+    const t = setInterval(async () => {
+      if (enviando.current || cola.current.length) return;
+      try {
+        const v = await nube.versionActual();
+        if (v !== null && v !== version.current) {
+          const r = await nube.leer();
+          version.current = r.version;
+          datosServidor.current = r;
+          setDatosCrudo(normalizar(r.datos));
+          setFalloGuardado(false);
+        }
+      } catch (_unused15) {/* si falla, se reintenta a los 20 segundos */}
+    }, 20000);
+    return () => clearInterval(t);
+  }, [yo]);
 
   /* --- operaciones --- */
 
@@ -4474,7 +5386,7 @@ function Programa() {
   const reiniciar = () => {
     setDatos(inicial());
     setImgs({});
-    setYo(null);
+    salirDeTodo();
     avisar("Datos de ejemplo restaurados");
   };
 
@@ -4499,10 +5411,7 @@ function Programa() {
       className: "rec"
     }, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement(Entrada, {
       datos: datos,
-      entrar: u => {
-        setYo(u);
-        setSeccion(u.rol === "admin" ? "resumen" : "saldo");
-      }
+      entrar: entrarComo
     }));
   }
 
@@ -4540,7 +5449,7 @@ function Programa() {
     onClick: () => setVerClave(true)
   }, "Mi contraseña"), /*#__PURE__*/React.createElement("button", {
     className: "salir",
-    onClick: () => setYo(null)
+    onClick: salirDeTodo
   }, "Salir"))), /*#__PURE__*/React.createElement("nav", {
     className: "menu"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4596,6 +5505,7 @@ function Programa() {
   }), esAdmin && seccion === "personas" && /*#__PURE__*/React.createElement(Personas, {
     datos: datos,
     setDatos: setDatos,
+    yo: quien,
     avisar: avisar
   }), esAdmin && seccion === "premios" && /*#__PURE__*/React.createElement(Premios, {
     datos: datos,
