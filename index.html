@@ -3766,9 +3766,11 @@ function Personas({
   datos,
   setDatos,
   yo,
-  avisar
+  avisar,
+  sincronizar
 }) {
   const [edita, setEdita] = useState(null);
+  const [guardandoPersona, setGuardandoPersona] = useState(false);
   const [busca, setBusca] = useState("");
   const [detalle, setDetalle] = useState(null);
   const [ajusta, setAjusta] = useState(null);
@@ -3847,23 +3849,16 @@ function Personas({
     "aria-hidden": "true"
   }, orden.col === col && !orden.asc ? "▼" : "▲")));
   const guardar = async () => {
+    if (guardandoPersona) return;
     const p = _objectSpread(_objectSpread({}, edita), {}, {
       usuario: edita.usuario.trim().toLowerCase()
     });
     if (!p.nombre.trim() || !p.usuario) return avisar("Falta el nombre o el usuario");
     const repetido = datos.personas.some(x => x.usuario === p.usuario && x.id !== p.id);
     if (repetido) return avisar("Ese usuario ya existe");
-
-    /* Con base compartida hay que crear o corregir también la cuenta de entrada. */
-    if (nube.activa) {
-      const antes = datos.personas.find(x => x.id === p.id);
-      if ((p.clave || "").length < 6) return avisar("La contraseña debe tener al menos 6 caracteres");
-      try {
-        if (!antes) await nube.crearCuenta(p.usuario, p.clave);else if (antes.clave !== p.clave) await nube.reponerClave(p.usuario, p.clave);
-      } catch (e) {
-        const ya = /already|registered|exists/i.test(e.message || "");
-        if (!ya) return avisar(e.message || "No se pudo crear la cuenta de entrada");
-      }
+    const antes = datos.personas.find(x => x.id === p.id);
+    if (nube.activa && (p.clave || "").length < 6) {
+      return avisar("La contraseña debe tener al menos 6 caracteres");
     }
     setDatos(d => {
       /* Si aquí se cambia la contraseña inicial, se borra la que se haya puesto en Ajustes;
@@ -3880,6 +3875,24 @@ function Personas({
         })]
       });
     });
+
+    /* La cuenta de entrada se crea DESPUÉS de que la persona ya quedó guardada
+       en la base: el script solo le pone contraseña a quien está en la lista. */
+    if (nube.activa) {
+      setGuardandoPersona(true);
+      try {
+        if (sincronizar) await sincronizar();
+        if (!antes) await nube.crearCuenta(p.usuario, p.clave);else if (antes.clave !== p.clave) await nube.reponerClave(p.usuario, p.clave);
+      } catch (e) {
+        const ya = /already|registered|exists|yaTenia/i.test(e.message || "");
+        setGuardandoPersona(false);
+        if (!ya) {
+          setEdita(null);
+          return avisar(`Se guardó ${p.nombre}, pero su entrada no quedó lista: ${e.message || "reintente desde Editar"}`);
+        }
+      }
+      setGuardandoPersona(false);
+    }
     avisar(p.id ? "Cambios guardados" : `${p.nombre} agregada al programa`);
     setEdita(null);
   };
@@ -3973,14 +3986,16 @@ function Personas({
     onClick: () => setEdita(_objectSpread({}, p))
   }, "Editar"))))))), edita && /*#__PURE__*/React.createElement(Modal, {
     titulo: edita.id ? "Editar persona" : "Agregar persona",
-    cerrar: () => setEdita(null),
+    cerrar: guardandoPersona ? () => {} : () => setEdita(null),
     pie: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       className: "b hueco",
-      onClick: () => setEdita(null)
+      onClick: () => setEdita(null),
+      disabled: guardandoPersona
     }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
       className: "b oro",
-      onClick: guardar
-    }, "Guardar"))
+      onClick: guardar,
+      disabled: guardandoPersona
+    }, guardandoPersona ? "Guardando…" : "Guardar"))
   }, /*#__PURE__*/React.createElement(Campo, {
     label: "Nombre completo"
   }, /*#__PURE__*/React.createElement("input", {
@@ -5087,6 +5102,20 @@ function Programa() {
     }
   };
 
+  /* Manda ya lo que esté pendiente y espera a que llegue a la base. Lo usa
+     quien necesita que el cambio exista allá antes de dar el paso siguiente,
+     como al crear la cuenta de entrada de alguien recién agregado. */
+  const sincronizar = async () => {
+    if (!nube.activa || !nube.sesion) return;
+    clearTimeout(reloj.current);
+    for (let i = 0; i < 12; i++) {
+      if (!cola.current.length && !enviando.current) return;
+      await enviar();
+      if (!cola.current.length && !enviando.current) return;
+      await new Promise(r => setTimeout(r, 250));
+    }
+  };
+
   /* Las fotos se traen aparte, después de pintar la aplicación. */
   const traerFotosAlAbrir = () => {
     Promise.resolve().then(() => nube.leerFotos()).then(m => setImgs(m || {})).catch(() => {});
@@ -5580,7 +5609,8 @@ function Programa() {
     datos: datos,
     setDatos: setDatos,
     yo: quien,
-    avisar: avisar
+    avisar: avisar,
+    sincronizar: sincronizar
   }), esAdmin && seccion === "premios" && /*#__PURE__*/React.createElement(Premios, {
     datos: datos,
     setDatos: setDatos,
