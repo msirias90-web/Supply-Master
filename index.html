@@ -1789,6 +1789,10 @@ const nubeGoogle = {
     if (this.sesion && this.sesion.vence < Date.now()) this.sesion = null;
     return this.sesion;
   },
+  /* Si el script devuelve el programa junto con la entrada, se guarda aquí y
+     la aplicación no tiene que pedirlo aparte: entrar queda en un solo viaje.
+     Con un script viejo llega vacío y todo sigue funcionando como antes. */
+  reciente: null,
   async entrar(usuario, clave) {
     const d = await this.pedir({
       accion: "entrar",
@@ -1800,10 +1804,21 @@ const nubeGoogle = {
       vence: d.vence,
       usuario: d.usuario
     });
+    this.reciente = d.datos && typeof d.version === "number" ? {
+      datos: d.datos,
+      version: d.version
+    } : null;
     return this.sesion;
+  },
+  /** Entrega una sola vez lo que vino con la entrada. */
+  tomarReciente() {
+    const r = this.reciente;
+    this.reciente = null;
+    return r;
   },
   salir() {
     const t = this.sesion && this.sesion.token;
+    this.reciente = null;
     this.guardarSesion(null);
     if (t) this.pedir({
       accion: "salir",
@@ -2807,42 +2822,72 @@ function EscenaGanador({
       alTerminar();
       return;
     }
-    let t = 0;
-    [2, 1].forEach(n => {
-      t += 850;
-      relojes.current.push(setTimeout(() => setNumero(n), t));
-    });
-    t += 850;
-    relojes.current.push(setTimeout(() => setFase("sorteo"), t));
-    const pasos = Math.max(14, lista.length * 6);
-    for (let i = 0; i < pasos; i++) {
-      t += 60 + Math.round(Math.pow(i / pasos, 2.7) * 300);
-      relojes.current.push(setTimeout(() => setMarca(i % lista.length), t));
-    }
-    const final = t + 360;
-    relojes.current.push(setTimeout(() => {
-      setFase("revelado");
-      alTerminar();
-    }, final));
 
-    /* El redoble acompaña toda la espera y cierra con el platillo.
-       Si el audio no está disponible, la revelación sigue igual. */
-    if (conSonido) {
+    /* Arranca la cuenta y el redoble en el mismo instante. El audio del
+       navegador puede tardar unos milisegundos en despertar, así que primero
+       se despierta y hasta entonces empiezan los dos a la vez: si no, el
+       tambor entra tarde y el platillo cae con el ganador ya en pantalla. */
+    let cancelado = false;
+    const arrancar = ctx => {
+      if (cancelado) return;
+      let t = 0;
+      [2, 1].forEach(n => {
+        t += 850;
+        relojes.current.push(setTimeout(() => setNumero(n), t));
+      });
+      t += 850;
+      relojes.current.push(setTimeout(() => setFase("sorteo"), t));
+      const pasos = Math.max(14, lista.length * 6);
+      for (let i = 0; i < pasos; i++) {
+        t += 60 + Math.round(Math.pow(i / pasos, 2.7) * 300);
+        relojes.current.push(setTimeout(() => setMarca(i % lista.length), t));
+      }
+      const final = t + 360;
+      relojes.current.push(setTimeout(() => {
+        setFase("revelado");
+        alTerminar();
+      }, final));
+      if (!ctx) return;
       try {
-        const ctx = prepararAudio();
-        if (ctx) {
-          const maestro = ctx.createGain();
-          maestro.gain.value = 1;
-          maestro.connect(ctx.destination);
-          mezcla.current = maestro;
-          const ahora = ctx.currentTime + 0.06;
-          redoble(ctx, maestro, ahora, final / 1000);
-          platillo(ctx, maestro, ahora + final / 1000);
-          fanfarria(ctx, maestro, ahora + final / 1000 + 0.03);
-        }
+        const maestro = ctx.createGain();
+        maestro.gain.value = 1;
+        maestro.connect(ctx.destination);
+        mezcla.current = maestro;
+        const ahora = ctx.currentTime + 0.02;
+        /* El platillo entra un pelín antes del nombre: el oído lo percibe
+           junto, y suena a que el golpe destapa al ganador. */
+        const golpeFinal = ahora + (final - 110) / 1000;
+        redoble(ctx, maestro, ahora, (final - 110) / 1000);
+        platillo(ctx, maestro, golpeFinal);
+        fanfarria(ctx, maestro, golpeFinal + 0.03);
       } catch (e) {/* sin sonido, pero la revelación continúa */}
+    };
+    let ctx = null;
+    try {
+      ctx = conSonido ? prepararAudio() : null;
+    } catch (e) {
+      ctx = null;
+    }
+    if (ctx && ctx.state === "suspended" && ctx.resume) {
+      let salio = false;
+      const seguir = () => {
+        if (!salio) {
+          salio = true;
+          arrancar(ctx);
+        }
+      };
+      try {
+        Promise.resolve(ctx.resume()).then(seguir, seguir);
+      } catch (e) {
+        seguir();
+      }
+      /* Si el navegador no contesta, no se queda esperando. */
+      relojes.current.push(setTimeout(seguir, 350));
+    } else {
+      arrancar(ctx);
     }
     return () => {
+      cancelado = true;
       relojes.current.forEach(clearTimeout);
       callar();
     };
@@ -2870,7 +2915,6 @@ function EscenaGanador({
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [cerrar]);
-  const total = votosDe(datos, ciclo.id, cat).length;
   return /*#__PURE__*/React.createElement("div", {
     className: "escena",
     role: "dialog",
@@ -2908,8 +2952,6 @@ function EscenaGanador({
     n: ganador,
     compacto: true
   })), /*#__PURE__*/React.createElement("div", {
-    className: "votos-gana"
-  }, conteo[ganador.id] || 0, " de ", total, " ", total === 1 ? "voto" : "votos"), /*#__PURE__*/React.createElement("div", {
     className: "cerrar"
   }, /*#__PURE__*/React.createElement("button", {
     className: "b hueco",
@@ -4600,33 +4642,40 @@ function MiClave({
   const [actual, setActual] = useState("");
   const [nueva, setNueva] = useState("");
   const [repetir, setRepetir] = useState("");
+  const [guardando, setGuardando] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
     var _ref$current2;
     return (_ref$current2 = ref.current) === null || _ref$current2 === void 0 ? void 0 : _ref$current2.focus();
   }, []);
   const guardar = async () => {
+    /* Con base compartida el cambio tarda un segundo o dos. Mientras tanto el
+       botón queda bloqueado: si no, se presiona varias veces y se mandan
+       varios cambios seguidos. */
+    if (guardando) return;
     if (nueva.length < 6) return avisar("La nueva debe tener al menos 6 caracteres");
     if (nueva !== repetir) return avisar("Las dos contraseñas nuevas no son iguales");
-
-    /* Con base compartida la contraseña vive en Supabase, no en el documento. */
     if (nube.activa) {
       if (!actual) return avisar("Escriba su contraseña actual");
       if (nueva === actual) return avisar("La nueva es igual a la que ya tenía");
-      /* En Supabase hay que volver a entrar para comprobar la actual; con
-         Google la comprueba el propio script, así que basta con mandársela. */
-      if (nube.necesitaCuentas) {
-        try {
-          await nube.entrar(yo.usuario, actual);
-        } catch (_unused9) {
-          return avisar("La contraseña actual no es correcta");
-        }
-      }
+      setGuardando(true);
       try {
+        /* En Supabase hay que volver a entrar para comprobar la actual; con
+           Google la comprueba el propio script, así que basta con mandársela. */
+        if (nube.necesitaCuentas) {
+          try {
+            await nube.entrar(yo.usuario, actual);
+          } catch (_unused9) {
+            setGuardando(false);
+            return avisar("La contraseña actual no es correcta");
+          }
+        }
         await nube.cambiarMiClave(nueva, actual);
       } catch (e) {
+        setGuardando(false);
         return avisar(e.sinRed ? "Sin conexión: no se pudo cambiar" : e.message || "No se pudo cambiar");
       }
+      setGuardando(false);
       avisar("Su contraseña quedó cambiada");
       cerrar();
       return;
@@ -4649,14 +4698,16 @@ function MiClave({
   };
   return /*#__PURE__*/React.createElement(Modal, {
     titulo: "Mi contraseña",
-    cerrar: cerrar,
+    cerrar: guardando ? () => {} : cerrar,
     pie: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       className: "b hueco",
-      onClick: cerrar
+      onClick: cerrar,
+      disabled: guardando
     }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
       className: "b oro",
-      onClick: guardar
-    }, "Cambiar mi contraseña"))
+      onClick: guardar,
+      disabled: guardando
+    }, guardando ? "Cambiando…" : "Cambiar mi contraseña"))
   }, /*#__PURE__*/React.createElement("p", {
     style: {
       margin: "0 0 16px",
@@ -4669,6 +4720,7 @@ function MiClave({
     ref: ref,
     type: "password",
     autoComplete: "current-password",
+    disabled: guardando,
     value: actual,
     onChange: e => setActual(e.target.value),
     onKeyDown: alTeclear
@@ -4677,6 +4729,7 @@ function MiClave({
   }, /*#__PURE__*/React.createElement("input", {
     type: "password",
     autoComplete: "new-password",
+    disabled: guardando,
     value: nueva,
     onChange: e => setNueva(e.target.value),
     onKeyDown: alTeclear
@@ -4685,10 +4738,18 @@ function MiClave({
   }, /*#__PURE__*/React.createElement("input", {
     type: "password",
     autoComplete: "new-password",
+    disabled: guardando,
     value: repetir,
     onChange: e => setRepetir(e.target.value),
     onKeyDown: alTeclear
-  })), /*#__PURE__*/React.createElement("p", {
+  })), guardando && /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: "10px 0 0",
+      color: "var(--oro)",
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, "Cambiando la contraseña… no cierre esta ventana."), /*#__PURE__*/React.createElement("p", {
     style: {
       margin: "4px 0 0",
       color: "var(--soft)",
@@ -5026,6 +5087,11 @@ function Programa() {
     }
   };
 
+  /* Las fotos se traen aparte, después de pintar la aplicación. */
+  const traerFotosAlAbrir = () => {
+    Promise.resolve().then(() => nube.leerFotos()).then(m => setImgs(m || {})).catch(() => {});
+  };
+
   /* Al abrir: sin base compartida, lo de siempre. Con base compartida, se
      espera a que la persona entre con su usuario. */
   useEffect(() => {
@@ -5038,11 +5104,6 @@ function Programa() {
             version.current = r.version;
             datosServidor.current = r;
             setDatosCrudo(normalizar(r.datos));
-            try {
-              setImgs(await nube.leerFotos());
-            } catch (_unused0) {
-              setImgs({});
-            }
             const quien = normalizar(r.datos).personas.find(p => p.usuario.toLowerCase() === String(nube.usuario).toLowerCase());
             if (quien && quien.activo) {
               setYo(quien);
@@ -5051,8 +5112,9 @@ function Programa() {
               nube.salir();
             }
             setCargando(false);
+            traerFotosAlAbrir();
             return;
-          } catch (_unused1) {
+          } catch (_unused0) {
             nube.salir();
           }
         }
@@ -5065,13 +5127,13 @@ function Programa() {
       try {
         const r = await window.storage.get(LLAVE);
         d = r ? JSON.parse(r.value) : null;
-      } catch (_unused10) {
+      } catch (_unused1) {
         d = null;
       }
       try {
         const r = await window.storage.get(LLAVE_IMG);
         m = r ? JSON.parse(r.value) : {};
-      } catch (_unused11) {
+      } catch (_unused10) {
         m = {};
       }
       setDatosCrudo(normalizar(d));
@@ -5087,7 +5149,7 @@ function Programa() {
       try {
         await window.storage.set(LLAVE, JSON.stringify(datos));
         setFalloGuardado(false);
-      } catch (_unused12) {
+      } catch (_unused11) {
         setFalloGuardado(true);
       }
     }, 450);
@@ -5098,7 +5160,7 @@ function Programa() {
     const t = setTimeout(async () => {
       try {
         await window.storage.set(LLAVE_IMG, JSON.stringify(imgs));
-      } catch (_unused13) {
+      } catch (_unused12) {
         setFalloGuardado(true);
       }
     }, 650);
@@ -5113,16 +5175,12 @@ function Programa() {
       setSeccion(u.rol === "admin" ? "resumen" : "saldo");
       return;
     }
-    const r = await nube.leer();
+    /* El programa suele venir con la entrada; si no, se pide. */
+    const r = nube.tomarReciente && nube.tomarReciente() || (await nube.leer());
     version.current = r.version;
     datosServidor.current = r;
     const d = normalizar(r.datos);
     setDatosCrudo(d);
-    try {
-      setImgs(await nube.leerFotos());
-    } catch (_unused14) {
-      setImgs({});
-    }
     const quien = d.personas.find(p => p.usuario.toLowerCase() === String(nube.usuario).toLowerCase());
     if (!quien || !quien.activo) {
       nube.salir();
@@ -5130,6 +5188,15 @@ function Programa() {
     }
     setYo(quien);
     setSeccion(quien.rol === "admin" ? "resumen" : "saldo");
+    /* Las fotos de los premios se traen después, ya con la aplicación abierta:
+       son lo más lento y no hacen falta para entrar. */
+    traerFotos();
+  };
+
+  /** Trae las fotos en segundo plano, sin hacer esperar a nadie. */
+  const traerFotos = () => {
+    if (!nube.activa) return;
+    Promise.resolve().then(() => nube.leerFotos()).then(m => setImgs(m || {})).catch(() => {/* sin fotos se ven las ilustraciones, que es suficiente */});
   };
   const salirDeTodo = () => {
     nube.salir();
@@ -5151,7 +5218,7 @@ function Programa() {
           setDatosCrudo(normalizar(r.datos));
           setFalloGuardado(false);
         }
-      } catch (_unused15) {/* si falla, se reintenta a los 20 segundos */}
+      } catch (_unused13) {/* si falla, se reintenta a los 20 segundos */}
     }, 20000);
     return () => clearInterval(t);
   }, [yo]);
