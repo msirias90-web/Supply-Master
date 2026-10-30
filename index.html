@@ -1793,12 +1793,16 @@ const nubeGoogle = {
      la aplicación no tiene que pedirlo aparte: entrar queda en un solo viaje.
      Con un script viejo llega vacío y todo sigue funcionando como antes. */
   reciente: null,
+  /* Número de versión que informa el script, para saber si la publicación
+     nueva ya quedó activa. Los scripts viejos no lo mandan. */
+  v: null,
   async entrar(usuario, clave) {
     const d = await this.pedir({
       accion: "entrar",
       usuario,
       clave
     });
+    this.v = typeof d.v === "number" ? d.v : 1;
     this.guardarSesion({
       token: d.token,
       vence: d.vence,
@@ -1845,19 +1849,23 @@ const nubeGoogle = {
     });
     return d.version;
   },
-  /* Devuelve null cuando otra persona se adelantó, igual que el de Supabase. */
-  async grabar(datos, version, nota) {
+  /* Devuelve null cuando otra persona se adelantó, igual que el de Supabase.
+     Si va una cuenta de entrada, el script la crea en el mismo viaje y avisa
+     con cuentaLista; un script viejo la ignora y la aplicación la crea aparte. */
+  async grabar(datos, version, nota, cuenta) {
     const d = await this.pedir({
       accion: "grabar",
       token: this.sesion && this.sesion.token,
       datos,
       version,
-      nota
+      nota,
+      cuenta: cuenta || null
     });
     if (d.conflicto) return null;
     return {
       datos: d.datos,
-      version: d.version
+      version: d.version,
+      cuentaLista: !!d.cuentaLista
     };
   },
   /* El script anota solo, al grabar: aquí no hay nada que mandar aparte. */
@@ -3881,8 +3889,14 @@ function Personas({
     if (nube.activa) {
       setGuardandoPersona(true);
       try {
-        if (sincronizar) await sincronizar();
-        if (!antes) await nube.crearCuenta(p.usuario, p.clave);else if (antes.clave !== p.clave) await nube.reponerClave(p.usuario, p.clave);
+        /* La cuenta viaja pegada al guardado cuando el script lo admite; si no,
+           se crea en un segundo paso, como antes. */
+        const esNueva = !antes;
+        const lista = sincronizar ? await sincronizar(esNueva ? {
+          usuario: p.usuario,
+          clave: p.clave
+        } : null) : false;
+        if (esNueva && !lista) await nube.crearCuenta(p.usuario, p.clave);else if (!esNueva && antes.clave !== p.clave) await nube.reponerClave(p.usuario, p.clave);
       } catch (e) {
         const ya = /already|registered|exists|yaTenia/i.test(e.message || "");
         setGuardandoPersona(false);
@@ -4893,6 +4907,23 @@ function Ajustes({
     }
   }, "Quien no tenga ninguna marca solo ve su saldo y el catálogo de premios. Un jurado nominado en una categoría no vota en esa categoría.")), /*#__PURE__*/React.createElement("div", {
     className: "bloque"
+  }, /*#__PURE__*/React.createElement("h2", null, "La base compartida"), !nube.activa ? /*#__PURE__*/React.createElement("p", {
+    className: "pie",
+    style: {
+      marginBottom: 0
+    }
+  }, "Sin base compartida: cada persona trabaja sobre su propia copia, en su navegador.") : nube.v && nube.v >= 2 ? /*#__PURE__*/React.createElement("p", {
+    className: "pie",
+    style: {
+      marginBottom: 0
+    }
+  }, "Conectada y al día. El programa se guarda en su Google Drive, en la carpeta", " ", /*#__PURE__*/React.createElement("b", null, "Supply Master"), ".") : /*#__PURE__*/React.createElement("div", {
+    className: "nota",
+    style: {
+      marginBottom: 0
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "El script publicado es una versión anterior"), "Funciona, pero entrar y guardar tardan más de lo necesario. Para ponerlo al día: pegue el archivo nuevo en script.google.com, guarde, y después Implementar → Administrar implementaciones → el lápiz → Versión: Nueva → Implementar.")), /*#__PURE__*/React.createElement("div", {
+    className: "bloque"
   }, /*#__PURE__*/React.createElement("h2", null, "Contraseñas"), /*#__PURE__*/React.createElement("p", {
     className: "pie",
     style: {
@@ -4976,6 +5007,8 @@ function Programa() {
   const [yo, setYo] = useState(null);
   const [verClave, setVerClave] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
+  /* Cuenta de entrada que viaja pegada al próximo guardado. */
+  const cuentaPend = useRef(null);
   const [seccion, setSeccion] = useState("resumen");
   const [aviso, setAviso] = useState("");
 
@@ -5078,9 +5111,10 @@ function Programa() {
         antesDeTodo = base.datos;
         let nuevo = base.datos;
         for (const fn of tanda) nuevo = fn(nuevo);
-        hecho = await nube.grabar(nuevo, base.version, resumirCambio(base.datos, nuevo));
+        hecho = await nube.grabar(nuevo, base.version, resumirCambio(base.datos, nuevo), cuentaPend.current);
       }
       if (hecho) {
+        if (hecho.cuentaLista) cuentaPend.current = null;
         cola.current = cola.current.slice(tanda.length);
         nube.anotar(hecho.version, resumirCambio(antesDeTodo, hecho.datos));
         version.current = hecho.version;
@@ -5105,15 +5139,19 @@ function Programa() {
   /* Manda ya lo que esté pendiente y espera a que llegue a la base. Lo usa
      quien necesita que el cambio exista allá antes de dar el paso siguiente,
      como al crear la cuenta de entrada de alguien recién agregado. */
-  const sincronizar = async () => {
-    if (!nube.activa || !nube.sesion) return;
+  const sincronizar = async cuenta => {
+    if (!nube.activa || !nube.sesion) return false;
+    if (cuenta) cuentaPend.current = cuenta;
     clearTimeout(reloj.current);
     for (let i = 0; i < 12; i++) {
-      if (!cola.current.length && !enviando.current) return;
+      if (!cola.current.length && !enviando.current) break;
       await enviar();
-      if (!cola.current.length && !enviando.current) return;
+      if (!cola.current.length && !enviando.current) break;
       await new Promise(r => setTimeout(r, 250));
     }
+    const lista = cuenta && cuentaPend.current === null;
+    cuentaPend.current = null;
+    return lista;
   };
 
   /* Las fotos se traen aparte, después de pintar la aplicación. */
