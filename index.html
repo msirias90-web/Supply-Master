@@ -1770,7 +1770,13 @@ const nubeGoogle = {
       d = null;
     }
     if (!r.ok || !d) throw new Error(`No se pudo hablar con la base (${r.status})`);
-    if (d.error) throw new Error(d.error);
+    if (d.error) {
+      const e = new Error(d.error);
+      /* Un permiso de entrada vencido no es un fallo de guardado: hay que
+         volver a entrar. Se marca para que la aplicación lo distinga. */
+      if (/venci|Vuelva a entrar/i.test(d.error)) e.sesionCaida = true;
+      throw e;
+    }
     return d;
   },
   guardarSesion(s) {
@@ -2245,7 +2251,9 @@ const ganadosDe = (datos, personaId) => (datos.movimientos || []).filter(m => m.
 
 function Entrada({
   datos,
-  entrar
+  entrar,
+  vencida,
+  alEntrar
 }) {
   const [usuario, setUsuario] = useState("");
   const [clave, setClave] = useState("");
@@ -2267,6 +2275,7 @@ function Entrada({
       setProbando(true);
       try {
         await nube.entrar(usuario, clave);
+        if (alEntrar) alEntrar();
         await entrar(null);
       } catch (e) {
         nube.salir();
@@ -2311,7 +2320,12 @@ function Entrada({
     className: "entrada"
   }, /*#__PURE__*/React.createElement("div", {
     className: "caja"
-  }, /*#__PURE__*/React.createElement(Logo, null), /*#__PURE__*/React.createElement("h1", null, datos.config.programa), estrenando ? /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Logo, null), /*#__PURE__*/React.createElement("h1", null, datos.config.programa), vencida && !estrenando && /*#__PURE__*/React.createElement("div", {
+    className: "nota",
+    style: {
+      margin: "0 0 18px"
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Su sesión venció"), "Vuelva a entrar con su usuario y contraseña. Lo que estaba escribiendo sin enviar se perdió, pero nada de lo que ya había guardado se tocó."), estrenando ? /*#__PURE__*/React.createElement("div", {
     className: "form"
   }, /*#__PURE__*/React.createElement("p", {
     style: {
@@ -5004,6 +5018,7 @@ function Programa() {
   const [imgs, setImgs] = useState({});
   const [cargando, setCargando] = useState(true);
   const [falloGuardado, setFalloGuardado] = useState(false);
+  const [sesionVencida, setSesionVencida] = useState(false);
   const [yo, setYo] = useState(null);
   const [verClave, setVerClave] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
@@ -5125,15 +5140,27 @@ function Programa() {
         setFalloGuardado(true);
       }
     } catch (e) {
-      setFalloGuardado(true);
+      if (e && e.sesionCaida) caerSesion();else setFalloGuardado(true);
     } finally {
       enviando.current = false;
       setSincronizando(false);
-      if (cola.current.length) {
+      if (cola.current.length && !sesionVencida) {
         clearTimeout(reloj.current);
         reloj.current = setTimeout(enviar, 1500);
       }
     }
+  };
+
+  /* Cuando el servidor dice que el permiso de entrada venció, no sirve de nada
+     reintentar: hay que volver a entrar. Se devuelve a la persona a la pantalla
+     de entrada con el motivo, en vez de dejarla creyendo que no se guardó. */
+  const caerSesion = () => {
+    cola.current = [];
+    clearTimeout(reloj.current);
+    setFalloGuardado(false);
+    setSesionVencida(true);
+    nube.salir();
+    setYo(null);
   };
 
   /* Manda ya lo que esté pendiente y espera a que llegue a la base. Lo usa
@@ -5181,7 +5208,9 @@ function Programa() {
             setCargando(false);
             traerFotosAlAbrir();
             return;
-          } catch (_unused0) {
+          } catch (e) {
+            /* El permiso guardado ya no sirve: se explica en la entrada. */
+            if (e && e.sesionCaida) setSesionVencida(true);
             nube.salir();
           }
         }
@@ -5194,13 +5223,13 @@ function Programa() {
       try {
         const r = await window.storage.get(LLAVE);
         d = r ? JSON.parse(r.value) : null;
-      } catch (_unused1) {
+      } catch (_unused0) {
         d = null;
       }
       try {
         const r = await window.storage.get(LLAVE_IMG);
         m = r ? JSON.parse(r.value) : {};
-      } catch (_unused10) {
+      } catch (_unused1) {
         m = {};
       }
       setDatosCrudo(normalizar(d));
@@ -5216,7 +5245,7 @@ function Programa() {
       try {
         await window.storage.set(LLAVE, JSON.stringify(datos));
         setFalloGuardado(false);
-      } catch (_unused11) {
+      } catch (_unused10) {
         setFalloGuardado(true);
       }
     }, 450);
@@ -5227,7 +5256,7 @@ function Programa() {
     const t = setTimeout(async () => {
       try {
         await window.storage.set(LLAVE_IMG, JSON.stringify(imgs));
-      } catch (_unused12) {
+      } catch (_unused11) {
         setFalloGuardado(true);
       }
     }, 650);
@@ -5285,7 +5314,10 @@ function Programa() {
           setDatosCrudo(normalizar(r.datos));
           setFalloGuardado(false);
         }
-      } catch (_unused13) {/* si falla, se reintenta a los 20 segundos */}
+      } catch (e) {
+        /* Si el permiso venció, reintentar no sirve: hay que volver a entrar. */
+        if (e && e.sesionCaida) caerSesion();
+      }
     }, 20000);
     return () => clearInterval(t);
   }, [yo]);
@@ -5333,6 +5365,11 @@ function Programa() {
       });
     })
   }));
+
+  /* El mes se vuelve a comprobar contra los datos frescos del servidor, no
+     contra lo que la persona tenía en pantalla: si mientras tanto se abrió
+     otro mes, la nominación entra en el que esté abierto de verdad. Así no
+     termina pegada a un mes cerrado, donde nadie la vería. */
   const nominar = ({
     ciclo,
     cat,
@@ -5341,22 +5378,27 @@ function Programa() {
     contexto,
     accion,
     resultado
-  }) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
-    nominaciones: [...d.nominaciones, {
-      id: id(),
-      ciclo,
-      cat,
-      persona,
-      por: yo.id,
-      proyecto: proyecto || "",
-      contexto,
-      accion,
-      resultado,
-      motivo: "",
-      fecha: new Date().toISOString(),
-      apoyos: []
-    }]
-  }));
+  }) => setDatos(d => {
+    const suyo = (d.ciclos || []).find(c => c.id === ciclo && c.estado === "nominacion");
+    const abierto = suyo || (d.ciclos || []).find(c => c.estado === "nominacion");
+    if (!abierto) return d; /* ya no hay mes recibiendo nominaciones */
+    return _objectSpread(_objectSpread({}, d), {}, {
+      nominaciones: [...d.nominaciones, {
+        id: id(),
+        ciclo: abierto.id,
+        cat,
+        persona,
+        por: yo.id,
+        proyecto: proyecto || "",
+        contexto,
+        accion,
+        resultado,
+        motivo: "",
+        fecha: new Date().toISOString(),
+        apoyos: []
+      }]
+    });
+  });
   const apoyar = (nominacionId, relato) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
     nominaciones: d.nominaciones.map(n => n.id === nominacionId ? _objectSpread(_objectSpread({}, n), {}, {
       apoyos: [...n.apoyos, _objectSpread(_objectSpread({
@@ -5368,21 +5410,27 @@ function Programa() {
     }) : n)
   }));
 
-  /* Un voto por persona y categoría: si ya votó, se reemplaza. */
+  /* Un voto por persona y categoría: si ya votó, se reemplaza. El voto solo
+     entra si ese mes sigue en votación cuando el cambio llega al servidor. */
   const votar = ({
     ciclo,
     cat,
     nominacion
-  }) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
-    votos: [...d.votos.filter(v => !(v.ciclo === ciclo && v.cat === cat && v.por === yo.id)), {
-      id: id(),
-      ciclo,
-      cat,
-      nominacion,
-      por: yo.id,
-      fecha: new Date().toISOString()
-    }]
-  }));
+  }) => setDatos(d => {
+    const c = (d.ciclos || []).find(x => x.id === ciclo);
+    if (!c || c.estado !== "votacion") return d;
+    if (!(d.nominaciones || []).some(n => n.id === nominacion)) return d;
+    return _objectSpread(_objectSpread({}, d), {}, {
+      votos: [...d.votos.filter(v => !(v.ciclo === ciclo && v.cat === cat && v.por === yo.id)), {
+        id: id(),
+        ciclo,
+        cat,
+        nominacion,
+        por: yo.id,
+        fecha: new Date().toISOString()
+      }]
+    });
+  });
   const fijarGanador = (cicloId, cat, nominacionId) => setDatos(d => _objectSpread(_objectSpread({}, d), {}, {
     ciclos: d.ciclos.map(c => c.id === cicloId ? _objectSpread(_objectSpread({}, c), {}, {
       ganadores: _objectSpread(_objectSpread({}, c.ganadores), {}, {
@@ -5552,7 +5600,9 @@ function Programa() {
       className: "rec"
     }, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement(Entrada, {
       datos: datos,
-      entrar: entrarComo
+      entrar: entrarComo,
+      vencida: sesionVencida,
+      alEntrar: () => setSesionVencida(false)
     }));
   }
 
