@@ -5024,6 +5024,8 @@ function Programa() {
   const [sincronizando, setSincronizando] = useState(false);
   /* Cuenta de entrada que viaja pegada al próximo guardado. */
   const cuentaPend = useRef(null);
+  /* Guardados fallidos seguidos, para espaciar los reintentos y parar. */
+  const fallos = useRef(0);
   const [seccion, setSeccion] = useState("resumen");
   const [aviso, setAviso] = useState("");
 
@@ -5135,19 +5137,56 @@ function Programa() {
         version.current = hecho.version;
         datosServidor.current = hecho;
         setDatosCrudo(cola.current.reduce((d, f) => f(d), hecho.datos));
+        fallos.current = 0;
         setFalloGuardado(false);
       } else {
+        fallos.current++;
         setFalloGuardado(true);
       }
     } catch (e) {
-      if (e && e.sesionCaida) caerSesion();else setFalloGuardado(true);
+      if (e && e.sesionCaida) {
+        caerSesion();
+        return;
+      }
+      fallos.current++;
+      setFalloGuardado(true);
     } finally {
       enviando.current = false;
       setSincronizando(false);
-      if (cola.current.length && !sesionVencida) {
+      /* Los reintentos se van espaciando y se detienen a los seis. Antes
+         reintentaba cada segundo y medio para siempre, y la aplicación se
+         quedaba girando sin que nadie supiera que ya no iba a salir. */
+      if (cola.current.length && !sesionVencida && fallos.current > 0 && fallos.current < 6) {
         clearTimeout(reloj.current);
-        reloj.current = setTimeout(enviar, 1500);
+        reloj.current = setTimeout(enviar, Math.min(1500 * Math.pow(2, fallos.current - 1), 24000));
+      } else if (cola.current.length && fallos.current === 0 && !sesionVencida) {
+        clearTimeout(reloj.current);
+        reloj.current = setTimeout(enviar, 400);
       }
+    }
+  };
+
+  /** Vuelve a intentar ya, cuando la persona lo pide. */
+  const reintentarGuardado = () => {
+    fallos.current = 0;
+    clearTimeout(reloj.current);
+    enviar();
+  };
+
+  /** Tira lo que no se pudo guardar y vuelve a lo que hay en la base. */
+  const descartarPendiente = async () => {
+    cola.current = [];
+    cuentaPend.current = null;
+    fallos.current = 0;
+    clearTimeout(reloj.current);
+    setFalloGuardado(false);
+    try {
+      const r = await nube.leer();
+      version.current = r.version;
+      datosServidor.current = r;
+      setDatosCrudo(normalizar(r.datos));
+    } catch (e) {
+      if (e && e.sesionCaida) caerSesion();
     }
   };
 
@@ -5661,7 +5700,22 @@ function Programa() {
       borderColor: "var(--alerta)",
       background: "#F6E6E0"
     }
-  }, /*#__PURE__*/React.createElement("b", null, "No se guardaron los últimos cambios"), "Revise la conexión y repita la acción."), !esAdmin && seccion === "saldo" && /*#__PURE__*/React.createElement(MiSaldo, {
+  }, /*#__PURE__*/React.createElement("b", null, "No se guardaron los últimos cambios"), "Lo que hizo se ve en su pantalla pero todavía no está en la base, así que nadie más lo ve. Revise la conexión y presione Reintentar.", /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "b oro chico",
+    onClick: reintentarGuardado,
+    disabled: sincronizando
+  }, sincronizando ? "Intentando…" : "Reintentar"), /*#__PURE__*/React.createElement("button", {
+    className: "b hueco chico",
+    onClick: descartarPendiente,
+    disabled: sincronizando
+  }, "Descartar y recargar"))), !esAdmin && seccion === "saldo" && /*#__PURE__*/React.createElement(MiSaldo, {
     datos: datos,
     imgs: imgs,
     yo: quien,
