@@ -2358,24 +2358,33 @@ function MoverCategorias({ datos, ciclo, recategorizar, avisar }) {
     const p = datos.personas.find((x) => x.id === pid);
     return p ? p.nombre : "—";
   };
-  const cuantosVotos = (nid) => (datos.votos || []).filter((v) => v.nominacion === nid).length;
+  const votosDeNom = (nid) => (datos.votos || []).filter((v) => v.nominacion === nid);
+  const cuantosVotos = (nid) => votosDeNom(nid).length;
   const esGanador = (n) => (ciclo.ganadores || {})[n.cat] === n.id;
 
-  const mover = (n, cat) => {
-    const r = recategorizar(n.id, cat);
+  /* Cuántos de esos votos no se pueden llevar a la categoría nueva porque
+     quien los emitió ya votó allá: un voto por persona y categoría. */
+  const choqueVotos = (nid, cat) => votosDeNom(nid).filter((v) =>
+    (datos.votos || []).some((o) => o.ciclo === ciclo.id && o.cat === cat && o.por === v.por)).length;
+
+  const mover = (n, cat, conservarVotos) => {
+    const r = recategorizar(n.id, cat, conservarVotos);
     setConfirmar(null);
     if (r.error) return avisar(r.error);
     setDestino((m) => { const s = { ...m }; delete s[n.id]; return s; });
-    avisar(`${nombreDe(n.persona)} quedó en ${cat}`
-      + (r.perdidos ? ` · se descartaron ${r.perdidos} voto${r.perdidos === 1 ? "" : "s"}` : ""));
+    const voto = (c) => `${c} voto${c === 1 ? "" : "s"}`;
+    let cola = "";
+    if (r.llevados) cola += ` · pasaron ${voto(r.llevados)}`;
+    if (r.perdidos) cola += ` · se descartaron ${voto(r.perdidos)}`;
+    avisar(`${nombreDe(n.persona)} quedó en ${cat}${cola}`);
   };
 
-  /* Sin votos ni marca de ganador no hay nada que advertir: se mueve de una. */
+  /* Sin votos ni marca de ganador no hay nada que preguntar: se mueve de una. */
   const pedir = (n, cat) => {
     const votos = cuantosVotos(n.id);
     const ganador = esGanador(n);
-    if (!votos && !ganador) return mover(n, cat);
-    setConfirmar({ n, cat, votos, ganador });
+    if (!votos && !ganador) return mover(n, cat, false);
+    setConfirmar({ n, cat, votos, ganador, choque: choqueVotos(n.id, cat), conservar: votos > 0 });
   };
 
   const comboSelect = {
@@ -2440,18 +2449,43 @@ function MoverCategorias({ datos, ciclo, recategorizar, avisar }) {
         <Modal titulo="Mover la nominación" cerrar={() => setConfirmar(null)}
           pie={<>
             <button className="b hueco" onClick={() => setConfirmar(null)}>Cancelar</button>
-            <button className="b oro" onClick={() => mover(confirmar.n, confirmar.cat)}>Sí, moverla</button>
+            <button className="b oro"
+              onClick={() => mover(confirmar.n, confirmar.cat, confirmar.conservar)}>Sí, moverla</button>
           </>}>
           <p style={{ marginTop: 0 }}>
             Va a mover la nominación de <b>{nombreDe(confirmar.n.persona)}</b> de{" "}
             <b>{confirmar.n.cat}</b> a <b>{confirmar.cat}</b>.
           </p>
           {confirmar.votos > 0 && (
-            <p style={{ fontSize: 14 }}>
-              Lleva {confirmar.votos} voto{confirmar.votos === 1 ? "" : "s"} en {confirmar.n.cat}, y
-              esos votos se descartan: quien votó ahí no escogió a esta persona en {confirmar.cat}.
-              El jurado puede volver a votar en {confirmar.n.cat}.
-            </p>
+            <div style={{ border: "1px solid var(--linea)", borderRadius: 2, padding: "12px 14px",
+              background: "#FBF9F3", marginBottom: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 9 }}>
+                Lleva {confirmar.votos} voto{confirmar.votos === 1 ? "" : "s"} en {confirmar.n.cat}.
+                ¿Qué hace con {confirmar.votos === 1 ? "ese voto" : "esos votos"}?
+              </div>
+              {[
+                { v: true, t: `Mantener${confirmar.votos === 1 ? "lo" : "los"}`,
+                  d: `Pasa${confirmar.votos === 1 ? "" : "n"} con la nominación a ${confirmar.cat}.` },
+                { v: false, t: `Descartar${confirmar.votos === 1 ? "lo" : "los"}`,
+                  d: `${confirmar.n.cat} queda libre y el jurado vuelve a votar ahí.` },
+              ].map((o) => (
+                <label key={String(o.v)} style={{ display: "flex", gap: 9, alignItems: "flex-start",
+                  cursor: "pointer", marginBottom: 7, fontSize: 13.5 }}>
+                  <input type="radio" name="votos-mover" checked={confirmar.conservar === o.v}
+                    onChange={() => setConfirmar((c) => ({ ...c, conservar: o.v }))}
+                    style={{ marginTop: 3, flex: "none" }} />
+                  <span><b>{o.t}.</b> {o.d}</span>
+                </label>
+              ))}
+              {confirmar.conservar && confirmar.choque > 0 && (
+                <div style={{ fontSize: 13, color: "var(--soft)", marginTop: 2 }}>
+                  De esos, {confirmar.choque} no{confirmar.choque === 1 ? " se puede" : " se pueden"}{" "}
+                  pasar: quien {confirmar.choque === 1 ? "lo emitió ya votó" : "los emitió ya votaron"}{" "}
+                  en {confirmar.cat}, y es un voto por persona y categoría. Su voto de{" "}
+                  {confirmar.cat} es el que vale.
+                </div>
+              )}
+            </div>
           )}
           {confirmar.ganador && (
             <p style={{ fontSize: 14 }}>
@@ -4068,9 +4102,11 @@ function Programa() {
      Coordinación, y solo mientras los puntos del mes no se hayan enviado:
      después los movimientos ya llevan la categoría escrita en el historial de
      cada persona, y moverla dejaría el historial diciendo otra cosa.
-     Los votos que tenía se descartan, porque un voto siempre se emitió para
-     una categoría: fuera de ella no significa nada. */
-  const recategorizar = (nominacionId, catNueva) => {
+     Con los votos que ya tenía decide Coordinación: se los lleva a la categoría
+     nueva, o los descarta y el jurado vuelve a votar. Lo único que no se puede
+     es llevarle el voto de alguien que ya votó en la categoría de destino: ahí
+     manda su voto de allá, porque es un voto por persona y categoría. */
+  const recategorizar = (nominacionId, catNueva, conservarVotos) => {
     if (yo.rol !== "admin") return { error: "Solo Coordinación puede mover una nominación" };
     if (CATEGORIAS.indexOf(catNueva) === -1) return { error: "Esa categoría no existe" };
 
@@ -4090,7 +4126,11 @@ function Programa() {
       return { error: `${p ? p.nombre : "Esa persona"} ya está nominada en ${catNueva}` };
     }
 
-    const perdidos = (datos.votos || []).filter((v) => v.nominacion === nominacionId).length;
+    const suyos = (datos.votos || []).filter((v) => v.nominacion === nominacionId);
+    const seLleva = (v) => conservarVotos && !(datos.votos || []).some(
+      (o) => o.ciclo === n.ciclo && o.cat === catNueva && o.por === v.por);
+    const llevados = suyos.filter(seLleva).length;
+    const perdidos = suyos.length - llevados;
     const ahora = new Date().toISOString();
 
     setDatos((d) => {
@@ -4108,7 +4148,13 @@ function Programa() {
         nominaciones: d.nominaciones.map((x) => x.id === nominacionId
           ? { ...x, cat: catNueva, movida: { de: x.cat, por: yo.id, fecha: ahora } }
           : x),
-        votos: (d.votos || []).filter((v) => v.nominacion !== nominacionId),
+        votos: (d.votos || []).reduce((acc, v) => {
+          if (v.nominacion !== nominacionId) { acc.push(v); return acc; }
+          const yaVotoAlla = (d.votos || []).some(
+            (o) => o.ciclo === act.ciclo && o.cat === catNueva && o.por === v.por);
+          if (conservarVotos && !yaVotoAlla) acc.push({ ...v, cat: catNueva });
+          return acc;
+        }, []),
         ciclos: d.ciclos.map((x) => {
           if (x.id !== act.ciclo) return x;
           /* Si estaba marcada como ganadora, esa marca se cae con ella. */
@@ -4121,7 +4167,7 @@ function Programa() {
       };
     });
 
-    return { perdidos, cat: catNueva };
+    return { llevados, perdidos, cat: catNueva };
   };
 
   const fijarGanador = (cicloId, cat, nominacionId) =>
